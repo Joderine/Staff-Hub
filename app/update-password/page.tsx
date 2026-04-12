@@ -8,6 +8,27 @@ export default function UpdatePassword() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    // Handle the token from the invite email URL
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
+        setReady(true)
+      }
+    })
+
+    // Also check if there's a hash in the URL with tokens
+    const hash = window.location.hash
+    if (hash && hash.includes('access_token')) {
+      setReady(true)
+    } else {
+      // Check existing session
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) setReady(true)
+      })
+    }
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -26,11 +47,17 @@ export default function UpdatePassword() {
       <div style={{ textAlign: 'center', background: '#fff', borderRadius: 16, padding: 40, maxWidth: 400, width: '100%', boxShadow: '0 4px 24px rgba(0,0,0,0.06)' }}>
         <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Password set!</div>
-        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>You can now sign in to Staff Hub.</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>You can now sign in to Staff Hub anytime with your email and password.</div>
         <button onClick={() => window.location.href = '/'} style={{ background: '#2a5f8f', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 24px', fontFamily: "'DM Sans', sans-serif", fontSize: 14, cursor: 'pointer', width: '100%' }}>
           Go to Staff Hub
         </button>
       </div>
+    </div>
+  )
+
+  if (!ready) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f7f6f2' }}>
+      <div style={{ width: 24, height: 24, borderRadius: '50%', border: '2px solid #e8e6e0', borderTopColor: '#2a5f8f', animation: 'spin 0.65s linear infinite' }} />
     </div>
   )
 
@@ -69,7 +96,7 @@ export default function UpdatePassword() {
                 {error}
               </div>
             )}
-            <button type="submit" disabled={loading} style={{ width: '100%', background: '#2a5f8f', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 20px', fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <button type="submit" disabled={loading} style={{ width: '100%', background: '#2a5f8f', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 20px', fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
               {loading ? 'Setting password…' : 'Set Password & Sign In'}
             </button>
           </form>
