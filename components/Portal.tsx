@@ -12,48 +12,36 @@ export default function Portal() {
   const [noProfile, setNoProfile] = useState(false)
 
   useEffect(() => {
-    checkSession()
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        fetchProfile(session.user.id)
-      } else {
-        setProfile(null)
+    let mounted = true
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!mounted) return
+
+      if (!session) {
         setLoading(false)
+        return
       }
-    })
-    return () => subscription.unsubscribe()
-  }, [])
 
-  async function checkSession() {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session) {
-      await fetchProfile(session.user.id)
-    } else {
-      setLoading(false)
-    }
-  }
-
-  async function fetchProfile(userId: string) {
-    setLoading(true)
-    try {
       const { data, error } = await supabase
         .from('staff_profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('id', session.user.id)
         .single()
 
+      if (!mounted) return
+
       if (error || !data) {
-        console.error('Profile error:', error)
         setNoProfile(true)
       } else {
         setProfile(data as StaffProfile)
       }
-    } catch (e) {
-      console.error('Fetch error:', e)
-      setNoProfile(true)
+      setLoading(false)
     }
-    setLoading(false)
-  }
+
+    init()
+    return () => { mounted = false }
+  }, [])
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
@@ -65,13 +53,24 @@ export default function Portal() {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', flexDirection: 'column', gap: 16 }}>
       <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 18, color: 'var(--text)' }}>Profile not found</div>
       <div style={{ fontSize: 13, color: 'var(--muted)' }}>Your account exists but has no profile. Contact your administrator.</div>
-      <button onClick={() => { supabase.auth.signOut(); setNoProfile(false) }} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+      <button onClick={() => { supabase.auth.signOut(); setNoProfile(false); setLoading(false) }} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
         Sign out
       </button>
     </div>
   )
 
-  if (!profile) return <LoginScreen />
-  if (profile.role === 'admin') return <AdminPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); setProfile(null) }} />
-  return <StaffPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); setProfile(null) }} />
+  if (!profile) return <LoginScreen onLogin={async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+    const { data } = await supabase.from('staff_profiles').select('*').eq('id', session.user.id).single()
+    if (data) setProfile(data as StaffProfile)
+    else setNoProfile(true)
+  }} />
+
+  if (profile.role === 'admin') return (
+    <AdminPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); setProfile(null) }} />
+  )
+  return (
+    <StaffPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); setProfile(null) }} />
+  )
 }
