@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-export default function LoginScreen() {
+export default function LoginScreen({ onLogin }: { onLogin?: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -22,7 +22,8 @@ export default function LoginScreen() {
   async function handleReset(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+if (!error && onLogin) onLogin()
     if (error) setError(error.message)
     else setResetSent(true)
     setLoading(false)
