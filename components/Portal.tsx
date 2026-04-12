@@ -13,33 +13,17 @@ export default function Portal() {
 
   useEffect(() => {
     let mounted = true
-
-    async function init() {
-      const { data: { session } } = await supabase.auth.getSession()
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (!mounted) return
-
-      if (!session) {
-        setLoading(false)
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('staff_profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single()
-
-      if (!mounted) return
-
-      if (error || !data) {
-        setNoProfile(true)
-      } else {
-        setProfile(data as StaffProfile)
-      }
-      setLoading(false)
-    }
-
-    init()
+      if (!session) { setLoading(false); return }
+      supabase.from('staff_profiles').select('*').eq('id', session.user.id).single()
+        .then(({ data, error }) => {
+          if (!mounted) return
+          if (error || !data) setNoProfile(true)
+          else setProfile(data as StaffProfile)
+          setLoading(false)
+        })
+    })
     return () => { mounted = false }
   }, [])
 
@@ -51,26 +35,21 @@ export default function Portal() {
 
   if (noProfile) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', flexDirection: 'column', gap: 16 }}>
-      <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 18, color: 'var(--text)' }}>Profile not found</div>
-      <div style={{ fontSize: 13, color: 'var(--muted)' }}>Your account exists but has no profile. Contact your administrator.</div>
-      <button onClick={() => { supabase.auth.signOut(); setNoProfile(false); setLoading(false) }} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+      <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 18 }}>Profile not found</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)' }}>Contact your administrator.</div>
+      <button onClick={() => { supabase.auth.signOut(); window.location.reload() }}
+        style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
         Sign out
       </button>
     </div>
   )
 
-  if (!profile) return <LoginScreen onLogin={async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) return
-    const { data } = await supabase.from('staff_profiles').select('*').eq('id', session.user.id).single()
-    if (data) setProfile(data as StaffProfile)
-    else setNoProfile(true)
-  }} />
+  if (!profile) return <LoginScreen />
 
   if (profile.role === 'admin') return (
-    <AdminPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); setProfile(null) }} />
+    <AdminPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); window.location.reload() }} />
   )
   return (
-    <StaffPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); setProfile(null) }} />
+    <StaffPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); window.location.reload() }} />
   )
 }
