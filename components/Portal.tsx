@@ -15,8 +15,15 @@ export default function Portal() {
     let mounted = true
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!mounted) return
-      if (!session) { setLoading(false); return }
-      supabase.from('staff_profiles').select('*').eq('id', session.user.id).single()
+      if (!session) {
+        setLoading(false)
+        return
+      }
+      supabase
+        .from('staff_profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single()
         .then(({ data, error }) => {
           if (!mounted) return
           if (error || !data) setNoProfile(true)
@@ -36,20 +43,4 @@ export default function Portal() {
   if (noProfile) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', flexDirection: 'column', gap: 16 }}>
       <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 18 }}>Profile not found</div>
-      <div style={{ fontSize: 13, color: 'var(--muted)' }}>Contact your administrator.</div>
-      <button onClick={() => { supabase.auth.signOut(); window.location.reload() }}
-        style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
-        Sign out
-      </button>
-    </div>
-  )
-
-  if (!profile) return <LoginScreen />
-
-  if (profile.role === 'admin') return (
-    <AdminPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); window.location.reload() }} />
-  )
-  return (
-    <StaffPortal profile={profile} onSignOut={() => { supabase.auth.signOut(); window.location.reload() }} />
-  )
-}
+      <div style
