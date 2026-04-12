@@ -14,22 +14,23 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, name, clinic, role } = await req.json()
-    if (!email || !name || !clinic) {
+    const { email, name, clinic, role, password } = await req.json()
+    if (!email || !name || !clinic || !password) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
     }
 
     const supabase = createServiceClient()
 
-    // Invite user via Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.admin.inviteUserByEmail(email, {
-      data: { name, clinic, role: role || 'staff' },
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://your-app.vercel.app'}/`,
+    // Create user with password directly — no email invite needed
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name, clinic, role: role || 'staff' },
     })
 
     if (authError) throw new Error(authError.message)
 
-    // Create profile
     const { error: profileError } = await supabase.from('staff_profiles').insert({
       id: authData.user.id,
       email,
