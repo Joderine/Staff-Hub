@@ -6,6 +6,72 @@ import { StaffProfile, Document, CATEGORIES, CLINICS } from '@/lib/types'
 interface Folder { id: string; name: string; clinic: string; parent_id: string | null }
 interface Props { profile: StaffProfile; onSignOut: () => void }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--muted)', marginBottom: 6 }}>{label}</div>
+      {children}
+    </div>
+  )
+}
+
+function Tag({ label, color, bg, border }: { label: string; color: string; bg?: string; border?: string }) {
+  return (
+    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, padding: '3px 9px', borderRadius: 20, background: bg || (color + '12'), color, border: '1px solid ' + (border || (color + '40')), whiteSpace: 'nowrap' }}>
+      {label}
+    </span>
+  )
+}
+
+const inputStyle: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: "'DM Sans', sans-serif", fontSize: 14, padding: '10px 14px', outline: 'none', transition: 'border-color 0.18s', boxSizing: 'border-box' }
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' }
+const primaryBtn: React.CSSProperties = { width: '100%', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 20px', fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }
+const ghostBtn: React.CSSProperties = { background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 14px', fontSize: 13, color: 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }
+
+function clinicColor(c: string) {
+  return c === 'MAH' ? 'var(--mah)' : c === 'HPVC' ? 'var(--hpvc)' : 'var(--green)'
+}
+
+function getFolderLabel(folders: Folder[], f: Folder): string {
+  if (!f.parent_id) return f.name
+  const parent = folders.find(p => p.id === f.parent_id)
+  if (!parent) return f.name
+  const grandparent = folders.find(g => g.id === parent.parent_id)
+  if (grandparent) return `${grandparent.name} → ${parent.name} → ${f.name}`
+  return `${parent.name} → ${f.name}`
+}
+
+function FolderTree({ folders, docs, parentId, clinic, depth, onDelete }: {
+  folders: Folder[]
+  docs: Document[]
+  parentId: string | null
+  clinic: string
+  depth: number
+  onDelete: (id: string, name: string) => void
+}) {
+  const children = folders.filter(f => f.parent_id === parentId && f.clinic === clinic)
+  if (children.length === 0) return null
+  return (
+    <>
+      {children.map(f => (
+        <div key={f.id}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6, marginLeft: depth * 20 }}>
+            <span>{depth === 0 ? '📁' : '📂'}</span>
+            <span style={{ flex: 1, fontSize: 14, fontFamily: "'DM Sans', sans-serif" }}>{f.name}</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: "'DM Mono', monospace" }}>
+              {docs.filter(d => d.folder_id === f.id).length} docs
+            </span>
+            <button onClick={() => onDelete(f.id, f.name)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 6, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}>
+              Delete
+            </button>
+          </div>
+          <FolderTree folders={folders} docs={docs} parentId={f.id} clinic={clinic} depth={depth + 1} onDelete={onDelete} />
+        </div>
+      ))}
+    </>
+  )
+}
+
 export default function AdminPortal({ profile, onSignOut }: Props) {
   const [tab, setTab] = useState<'docs' | 'staff' | 'upload' | 'folders'>('docs')
   const [docs, setDocs] = useState<Document[]>([])
@@ -152,42 +218,6 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     setFolders(prev => prev.filter(f => f.id !== id))
   }
 
-  // Build folder tree for display
-  function buildTree(parentId: string | null, clinic: string, depth = 0): JSX.Element[] {
-    return folders
-      .filter(f => f.parent_id === parentId && f.clinic === clinic)
-      .map(f => (
-        <div key={f.id}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6, marginLeft: depth * 20 }}>
-            <span>{depth === 0 ? '📁' : '📂'}</span>
-            <span style={{ flex: 1, fontSize: 14, fontFamily: "'DM Sans', sans-serif" }}>{f.name}</span>
-            <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: "'DM Mono', monospace" }}>
-              {docs.filter(d => d.folder_id === f.id).length} docs
-            </span>
-            <button onClick={() => handleDeleteFolder(f.id, f.name)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 6, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}>
-              Delete
-            </button>
-          </div>
-          {buildTree(f.id, clinic, depth + 1)}
-        </div>
-      ))
-  }
-
-  // Folders available for upload dropdown (filtered by selected clinic)
-  const uploadFolders = folders.filter(f => f.clinic === clinic || clinic === 'Both')
-  const topLevelFolders = uploadFolders.filter(f => f.parent_id === null)
-
-  function getFolderLabel(f: Folder): string {
-    if (!f.parent_id) return f.name
-    const parent = folders.find(p => p.id === f.parent_id)
-    if (!parent) return f.name
-    const grandparent = folders.find(g => g.id === parent.parent_id)
-    if (grandparent) return `${grandparent.name} → ${parent.name} → ${f.name}`
-    return `${parent.name} → ${f.name}`
-  }
-
-  const clinicColor = (c: string) => c === 'MAH' ? 'var(--mah)' : c === 'HPVC' ? 'var(--hpvc)' : 'var(--green)'
-
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, position: 'sticky', top: 0, zIndex: 10 }}>
@@ -213,7 +243,6 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
 
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 24px' }}>
 
-        {/* DOCUMENTS TAB */}
         {tab === 'docs' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -235,7 +264,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <Tag label={doc.category} color="var(--accent)" />
                       <Tag label={doc.clinic} color={clinicColor(doc.clinic)} />
-                      {folder && <Tag label={'📁 ' + getFolderLabel(folder)} color="var(--muted)" />}
+                      {folder && <Tag label={'📁 ' + getFolderLabel(folders, folder)} color="var(--muted)" />}
                     </div>
                   </div>
                   <button onClick={() => handleDelete(doc)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>
@@ -247,12 +276,9 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
           </div>
         )}
 
-        {/* FOLDERS TAB */}
         {tab === 'folders' && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Manage Folders</div>
-
-            {/* Create folder form */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, marginBottom: 28 }}>
               <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 18 }}>Create New Folder</div>
               <form onSubmit={handleCreateFolder}>
@@ -292,7 +318,6 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
               </form>
             </div>
 
-            {/* Folder trees per clinic */}
             {(['MAH', 'HPVC'] as const).map(c => (
               <div key={c} style={{ marginBottom: 32 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -301,13 +326,14 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                 </div>
                 {folders.filter(f => f.clinic === c && f.parent_id === null).length === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--muted)', padding: '16px 0' }}>No folders yet for {c}</div>
-                ) : buildTree(null, c)}
+                ) : (
+                  <FolderTree folders={folders} docs={docs} parentId={null} clinic={c} depth={0} onDelete={handleDeleteFolder} />
+                )}
               </div>
             ))}
           </div>
         )}
 
-        {/* UPLOAD TAB */}
         {tab === 'upload' && (
           <div style={{ maxWidth: 560 }}>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Upload Document</div>
@@ -339,7 +365,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                 <select value={folderId} onChange={e => setFolderId(e.target.value)} style={selectStyle}>
                   <option value="">— No folder —</option>
                   {folders.filter(f => f.clinic === clinic || clinic === 'Both').map(f => (
-                    <option key={f.id} value={f.id}>{getFolderLabel(f)}</option>
+                    <option key={f.id} value={f.id}>{getFolderLabel(folders, f)}</option>
                   ))}
                 </select>
               </Field>
@@ -355,7 +381,6 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
           </div>
         )}
 
-        {/* STAFF TAB */}
         {tab === 'staff' && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Manage Staff</div>
@@ -388,4 +413,45 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                     </select>
                   </Field>
                   <Field label="Temporary Password">
-                    <input type="text" value={invitePasswo
+                    <input type="text" value={invitePassword} onChange={e => setInvitePassword(e.target.value)} placeholder="Min 8 characters" required style={inputStyle}
+                      onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                      onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                  </Field>
+                </div>
+                {inviteMsg && (
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: inviteMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', color: inviteMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)', border: '1px solid ' + (inviteMsg.startsWith('✓') ? '#bbf7d0' : '#fecaca') }}>
+                    {inviteMsg}
+                  </div>
+                )}
+                <button type="submit" disabled={loading} style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>
+                  {loading ? 'Adding...' : 'Add Staff Member'}
+                </button>
+              </form>
+            </div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 14 }}>
+              Current Staff ({staff.length})
+            </div>
+            {staff.map(s => (
+              <div key={s.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 14, color: 'var(--accent)', flexShrink: 0 }}>
+                  {s.name.charAt(0)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{s.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.email}</div>
+                </div>
+                <Tag label={s.clinic} color={clinicColor(s.clinic)} />
+                {s.role === 'admin' && <Tag label="Admin" color="#92400e" bg="#fef3c7" border="#fbbf24" />}
+                {s.role !== 'admin' && (
+                  <button onClick={() => handleRemoveStaff(s.id, s.name)} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
