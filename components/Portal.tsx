@@ -6,8 +6,6 @@ import LoginScreen from './LoginScreen'
 import StaffPortal from './StaffPortal'
 import AdminPortal from './AdminPortal'
 
-const centerStyle = 'display:flex;align-items:center;justify-content:center;height:100vh;background:#f7f6f2;flex-direction:column;gap:16px;'
-
 export default function Portal() {
   const [profile, setProfile] = useState<StaffProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -15,26 +13,46 @@ export default function Portal() {
 
   useEffect(() => {
     let mounted = true
-    supabase.auth.getSession().then(({ data: { session } }) => {
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!mounted) return
       if (!session) {
         setLoading(false)
         return
       }
-      supabase
-        .from('staff_profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single()
-        .then(({ data, error }) => {
-          if (!mounted) return
-          if (error || !data) setNoProfile(true)
-          else setProfile(data as StaffProfile)
-          setLoading(false)
+
+      try {
+        const res = await fetch('/api/profile', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`
+          }
         })
+
+        if (!mounted) return
+
+        if (!res.ok) {
+          setNoProfile(true)
+        } else {
+          const data = await res.json()
+          if (data?.profile) {
+            setProfile(data.profile as StaffProfile)
+          } else {
+            setNoProfile(true)
+          }
+        }
+      } catch {
+        if (mounted) setNoProfile(true)
+      }
+
+      if (mounted) setLoading(false)
     })
+
     return () => { mounted = false }
   }, [])
+
+  const handleSignOut = () => {
+    supabase.auth.signOut().then(() => window.location.reload())
+  }
 
   if (loading) {
     return (
@@ -50,7 +68,7 @@ export default function Portal() {
         <p style={{ fontSize: '18px', fontFamily: 'sans-serif' }}>Profile not found</p>
         <p style={{ fontSize: '13px', color: '#6b7280', fontFamily: 'sans-serif' }}>Contact your administrator.</p>
         <button
-          onClick={() => { supabase.auth.signOut(); window.location.reload() }}
+          onClick={handleSignOut}
           style={{ background: '#2a5f8f', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', cursor: 'pointer', fontFamily: 'sans-serif' }}
         >
           Sign out
@@ -64,18 +82,8 @@ export default function Portal() {
   }
 
   if (profile.role === 'admin') {
-    return (
-      <AdminPortal
-        profile={profile}
-        onSignOut={() => { supabase.auth.signOut(); window.location.reload() }}
-      />
-    )
+    return <AdminPortal profile={profile} onSignOut={handleSignOut} />
   }
 
-  return (
-    <StaffPortal
-      profile={profile}
-      onSignOut={() => { supabase.auth.signOut(); window.location.reload() }}
-    />
-  )
+  return <StaffPortal profile={profile} onSignOut={handleSignOut} />
 }
