@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { StaffProfile, Document } from '@/lib/types'
 
+interface Folder { id: string; name: string; clinic: string; parent_id: string | null }
 interface Props { profile: StaffProfile; onSignOut: () => void }
 interface Message { role: 'user' | 'assistant'; content: string }
 
@@ -18,19 +19,28 @@ const SUGGESTIONS = [
 export default function StaffPortal({ profile, onSignOut }: Props) {
   const [tab, setTab] = useState<'ask' | 'docs'>('ask')
   const [docs, setDocs] = useState<Document[]>([])
+  const [folders, setFolders] = useState<Folder[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [filterCat, setFilterCat] = useState('All')
   const [openingDoc, setOpeningDoc] = useState<string | null>(null)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const bottomRef = useRef<HTMLDivElement>(null)
   const clinicColor = profile.clinic === 'MAH' ? '#2a5f8f' : '#7c3aed'
 
-  useEffect(() => { loadDocs() }, [])
+  useEffect(() => { loadDocs(); loadFolders() }, [])
 
   async function loadDocs() {
-    const { data } = await supabase.from('documents').select('*').order('category')
+    const { data } = await supabase.from('documents').select('*').order('title')
     if (data) setDocs(data as Document[])
+  }
+
+  async function loadFolders() {
+    const res = await fetch('/api/admin/folders')
+    const data = await res.json()
+    if (data.folders) {
+      setFolders(data.folders.filter((f: Folder) => f.clinic === profile.clinic))
+    }
   }
 
   async function viewDoc(doc: Document) {
@@ -39,7 +49,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
       const { data, error } = await supabase.storage.from('staff-docs').createSignedUrl(doc.storage_path, 60)
       if (error || !data) throw new Error('Could not get document URL')
       window.open(data.signedUrl, '_blank')
-    } catch (err) {
+    } catch {
       alert('Could not open document. Please try again.')
     }
     setOpeningDoc(null)
@@ -66,12 +76,89 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
   }
 
-  const categories = ['All', ...Array.from(new Set(docs.map(d => d.category)))]
-  const filteredDocs = filterCat === 'All' ? docs : docs.filter(d => d.category === filterCat)
+  function toggleFolder(id: string) {
+    setExpandedFolders(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Unfiled docs (no folder_id, matching clinic)
+  const unfiledDocs = docs.filter(d =>
+    !d.folder_id && (d.clinic === profile.clinic || d.clinic === 'Both')
+  )
+
+  function renderFolder(folder: Folder, depth = 0): React.ReactNode {
+    const subfolders = folders.filter(f => f.parent_id === folder.id)
+    const folderDocs = docs.filter(d =>
+      d.folder_id === folder.id && (d.clinic === profile.clinic || d.clinic === 'Both')
+    )
+    const isExpanded = expandedFolders.has(folder.id)
+    const isEmpty = subfolders.length === 0 && folderDocs.length === 0
+
+    return (
+      <div key={folder.id} style={{ marginLeft: depth * 16 }}>
+        <button
+          onClick={() => toggleFolder(folder.id)}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            padding: '11px 16px', background: '#fff', border: '1px solid #e8e6e0',
+            borderRadius: 10, marginBottom: 6, cursor: isEmpty ? 'default' : 'pointer',
+            fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: '#1a1a2e', textAlign: 'left',
+          }}
+        >
+          <span style={{ fontSize: 16 }}>{isExpanded ? '📂' : '📁'}</span>
+          <span style={{ flex: 1, fontWeight: 500 }}>{folder.name}</span>
+          {!isEmpty && (
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>{isExpanded ? '▲' : '▼'}</span>
+          )}
+          {isEmpty && <span style={{ fontSize: 11, color: '#9ca3af' }}>Empty</span>}
+        </button>
+
+        {isExpanded && (
+          <div style={{ marginBottom: 6 }}>
+            {subfolders.map(sf => renderFolder(sf, depth + 1))}
+            {folderDocs.map(doc => renderDocRow(doc, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderDocRow(doc: Document, depth = 0): React.ReactNode {
+    return (
+      <div key={doc.id} style={{
+        marginLeft: depth * 16, display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 16px', background: '#fafaf8', border: '1px solid #e8e6e0',
+        borderRadius: 8, marginBottom: 6,
+      }}>
+        <span style={{ fontSize: 16 }}>📄</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{doc.title}</div>
+          {doc.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{doc.description}</div>}
+        </div>
+        <button
+          onClick={() => viewDoc(doc)}
+          disabled={openingDoc === doc.id}
+          style={{
+            background: clinicColor, color: '#fff', border: 'none',
+            borderRadius: 8, padding: '7px 14px', fontSize: 12,
+            fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+            opacity: openingDoc === doc.id ? 0.6 : 1, flexShrink: 0,
+          }}
+        >
+          {openingDoc === doc.id ? '⏳' : 'View'}
+        </button>
+      </div>
+    )
+  }
+
+  const topLevelFolders = folders.filter(f => f.parent_id === null)
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f6f2' }}>
-      {/* Header */}
       <div style={{ background: '#fff', borderBottom: '1px solid #e8e6e0', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 16, position: 'sticky', top: 0, zIndex: 10 }}>
         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, color: '#2a5f8f' }}>Staff Hub</div>
         <div style={{ padding: '3px 10px', borderRadius: 20, background: `${clinicColor}20`, border: `1px solid ${clinicColor}50`, color: clinicColor, fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 500 }}>
@@ -85,7 +172,6 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ background: '#fff', borderBottom: '1px solid #e8e6e0', padding: '0 24px', display: 'flex', gap: 2 }}>
         {(['ask', 'docs'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
@@ -100,7 +186,6 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
 
       <div style={{ maxWidth: 760, margin: '0 auto', padding: '28px 24px' }}>
 
-        {/* ASK TAB */}
         {tab === 'ask' && (
           <div>
             <div style={{ marginBottom: 20 }}>
@@ -110,11 +195,8 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
                   <button key={i} onClick={() => ask(s)} style={{
                     background: '#fff', border: '1px solid #e8e6e0', borderRadius: 20,
                     padding: '7px 14px', fontSize: 12, color: '#6b7280', cursor: 'pointer',
-                    fontFamily: "'DM Sans', sans-serif", transition: 'all 0.15s',
-                  }}
-                    onMouseEnter={e => { (e.target as HTMLElement).style.borderColor = '#2a5f8f'; (e.target as HTMLElement).style.color = '#2a5f8f' }}
-                    onMouseLeave={e => { (e.target as HTMLElement).style.borderColor = '#e8e6e0'; (e.target as HTMLElement).style.color = '#6b7280' }}
-                  >{s}</button>
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>{s}</button>
                 ))}
               </div>
             </div>
@@ -170,65 +252,27 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
           </div>
         )}
 
-        {/* DOCS TAB */}
         {tab === 'docs' && (
           <div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 20 }}>
-              {categories.map(cat => (
-                <button key={cat} onClick={() => setFilterCat(cat)} style={{
-                  padding: '6px 14px', borderRadius: 20,
-                  border: `1px solid ${filterCat === cat ? '#2a5f8f' : '#e8e6e0'}`,
-                  background: filterCat === cat ? 'rgba(42,95,143,0.08)' : '#fff',
-                  color: filterCat === cat ? '#2a5f8f' : '#6b7280',
-                  fontFamily: "'DM Sans', sans-serif", fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
-                }}>{cat}</button>
-              ))}
-            </div>
-
-            {filteredDocs.length === 0 ? (
+            {topLevelFolders.length === 0 && unfiledDocs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>📂</div>
                 <div style={{ fontSize: 14, color: '#6b7280' }}>No documents yet</div>
               </div>
             ) : (
-              filteredDocs.map(doc => (
-                <div key={doc.id} style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 12, padding: '16px 20px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div style={{ fontSize: 24, flexShrink: 0 }}>{categoryIcon(doc.category)}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{doc.title}</div>
-                    {doc.description && <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>{doc.description}</div>}
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(42,95,143,0.08)', color: '#2a5f8f', border: '1px solid rgba(42,95,143,0.2)' }}>{doc.category}</span>
-                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, padding: '2px 8px', borderRadius: 20, background: doc.clinic === 'MAH' ? '#eff6ff' : doc.clinic === 'HPVC' ? '#f5f3ff' : '#f0fdf4', color: doc.clinic === 'MAH' ? '#2a5f8f' : doc.clinic === 'HPVC' ? '#7c3aed' : '#16a34a', border: '1px solid currentColor' }}>{doc.clinic}</span>
-                    </div>
+              <div>
+                {topLevelFolders.map(f => renderFolder(f))}
+                {unfiledDocs.length > 0 && (
+                  <div style={{ marginTop: topLevelFolders.length > 0 ? 20 : 0 }}>
+                    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9ca3af', marginBottom: 10 }}>Other Documents</div>
+                    {unfiledDocs.map(doc => renderDocRow(doc))}
                   </div>
-                  <button
-                    onClick={() => viewDoc(doc)}
-                    disabled={openingDoc === doc.id}
-                    style={{
-                      background: '#2a5f8f', color: '#fff', border: 'none',
-                      borderRadius: 8, padding: '8px 16px', fontSize: 13,
-                      fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
-                      opacity: openingDoc === doc.id ? 0.6 : 1,
-                      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6,
-                    }}
-                  >
-                    {openingDoc === doc.id ? '⏳' : '📄'} View
-                  </button>
-                </div>
-              ))
+                )}
+              </div>
             )}
           </div>
         )}
       </div>
     </div>
   )
-}
-
-function categoryIcon(cat: string) {
-  const icons: Record<string, string> = {
-    'Emergency Procedures': '🚨', 'Contacts': '📞', 'HR & Leave': '👥',
-    'Clinical Protocols': '🏥', 'Equipment': '🔧', 'WHS & Safety': '⚠️', 'General': '📄',
-  }
-  return icons[cat] || '📄'
 }
