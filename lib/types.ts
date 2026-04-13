@@ -15,6 +15,7 @@ export interface Document {
   title: string
   description: string
   category: string
+  folder_id?: string | null  //
   clinic: 'MAH' | 'HPVC' | 'Both'
 }
 
