@@ -153,7 +153,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
   }
 
   // Build folder tree for display
-  function buildTree(parentId: string | null, clinic: string, depth = 0): React.ReactNode[] {
+  function buildTree(parentId: string | null, clinic: string, depth = 0): JSX.Element[] {
     return folders
       .filter(f => f.parent_id === parentId && f.clinic === clinic)
       .map(f => (
