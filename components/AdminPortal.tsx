@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { StaffProfile, Document, CATEGORIES, CLINICS } from '@/lib/types'
 
 interface Folder { id: string; name: string; clinic: string; parent_id: string | null }
+interface Link { id: string; title: string; url: string; description: string; clinic: string; folder_id: string | null }
 interface Props { profile: StaffProfile; onSignOut: () => void }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -73,10 +74,11 @@ function FolderTree({ folders, docs, parentId, clinic, depth, onDelete }: {
 }
 
 export default function AdminPortal({ profile, onSignOut }: Props) {
-  const [tab, setTab] = useState<'docs' | 'staff' | 'upload' | 'folders'>('docs')
+  const [tab, setTab] = useState<'docs' | 'staff' | 'upload' | 'folders' | 'links'>('docs')
   const [docs, setDocs] = useState<Document[]>([])
   const [staff, setStaff] = useState<StaffProfile[]>([])
   const [folders, setFolders] = useState<Folder[]>([])
+  const [links, setLinks] = useState<Link[]>([])
   const [loading, setLoading] = useState(false)
 
   const [file, setFile] = useState<File | null>(null)
@@ -100,7 +102,14 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
   const [newFolderParent, setNewFolderParent] = useState<string>('')
   const [folderMsg, setFolderMsg] = useState('')
 
-  useEffect(() => { loadDocs(); loadStaff(); loadFolders() }, [])
+  const [linkTitle, setLinkTitle] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkDescription, setLinkDescription] = useState('')
+  const [linkClinic, setLinkClinic] = useState<'MAH' | 'HPVC' | 'Both'>('Both')
+  const [linkFolderId, setLinkFolderId] = useState<string>('')
+  const [linkMsg, setLinkMsg] = useState('')
+
+  useEffect(() => { loadDocs(); loadStaff(); loadFolders(); loadLinks() }, [])
 
   async function loadDocs() {
     const { data } = await supabase.from('documents').select('*').order('created_at', { ascending: false })
@@ -117,6 +126,12 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     const res = await fetch('/api/admin/folders')
     const data = await res.json()
     if (data.folders) setFolders(data.folders)
+  }
+
+  async function loadLinks() {
+    const res = await fetch('/api/admin/links')
+    const data = await res.json()
+    if (data.links) setLinks(data.links)
   }
 
   async function handleUpload(e: React.FormEvent) {
@@ -200,8 +215,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     const data = await res.json()
     if (data.folder) {
       setFolders(prev => [...prev, data.folder])
-      setNewFolderName('')
-      setNewFolderParent('')
+      setNewFolderName(''); setNewFolderParent('')
       setFolderMsg('✓ Folder created')
     } else {
       setFolderMsg('✕ Error: ' + data.error)
@@ -218,6 +232,35 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     setFolders(prev => prev.filter(f => f.id !== id))
   }
 
+  async function handleAddLink(e: React.FormEvent) {
+    e.preventDefault()
+    if (!linkTitle || !linkUrl) return
+    setLinkMsg('')
+    const res = await fetch('/api/admin/links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: linkTitle, url: linkUrl, description: linkDescription, clinic: linkClinic, folder_id: linkFolderId || null })
+    })
+    const data = await res.json()
+    if (data.link) {
+      setLinks(prev => [data.link, ...prev])
+      setLinkTitle(''); setLinkUrl(''); setLinkDescription(''); setLinkFolderId('')
+      setLinkMsg('✓ Link added successfully')
+    } else {
+      setLinkMsg('✕ Error: ' + data.error)
+    }
+  }
+
+  async function handleDeleteLink(id: string, title: string) {
+    if (!confirm('Delete link "' + title + '"?')) return
+    await fetch('/api/admin/links', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    })
+    setLinks(prev => prev.filter(l => l.id !== id))
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, position: 'sticky', top: 0, zIndex: 10 }}>
@@ -229,14 +272,14 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
         </div>
       </div>
 
-      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 24px', display: 'flex', gap: 2 }}>
-        {[['docs', 'Documents'], ['folders', 'Folders'], ['upload', 'Upload Doc'], ['staff', 'Manage Staff']].map(([key, label]) => (
+      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 24px', display: 'flex', gap: 2, overflowX: 'auto' }}>
+        {[['docs', 'Documents'], ['folders', 'Folders'], ['upload', 'Upload Doc'], ['links', 'Video Links'], ['staff', 'Manage Staff']].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key as any)} style={{
             padding: '10px 18px', border: 'none', background: 'transparent',
             fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 500,
             color: tab === key ? 'var(--accent)' : 'var(--muted)',
             borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer',
+            cursor: 'pointer', whiteSpace: 'nowrap',
           }}>{label}</button>
         ))}
       </div>
@@ -284,7 +327,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
               <form onSubmit={handleCreateFolder}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                   <Field label="Folder Name">
-                    <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="e.g. General Important Info" required style={inputStyle}
+                    <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="e.g. Dental Protocols" required style={inputStyle}
                       onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
                       onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
                   </Field>
@@ -312,12 +355,9 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                     {folderMsg}
                   </div>
                 )}
-                <button type="submit" style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>
-                  Create Folder
-                </button>
+                <button type="submit" style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>Create Folder</button>
               </form>
             </div>
-
             {(['MAH', 'HPVC'] as const).map(c => (
               <div key={c} style={{ marginBottom: 32 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -378,6 +418,81 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                 {loading ? 'Uploading...' : 'Upload Document'}
               </button>
             </form>
+          </div>
+        )}
+
+        {tab === 'links' && (
+          <div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Video Links</div>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, marginBottom: 28 }}>
+              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 18 }}>Add New Video Link</div>
+              <form onSubmit={handleAddLink}>
+                <Field label="Title">
+                  <input value={linkTitle} onChange={e => setLinkTitle(e.target.value)} placeholder="e.g. How to set up the dental machine" required style={inputStyle}
+                    onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                    onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                </Field>
+                <Field label="YouTube URL">
+                  <input value={linkUrl} onChange={e => setLinkUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=..." required style={inputStyle}
+                    onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                    onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                </Field>
+                <Field label="Description (optional)">
+                  <input value={linkDescription} onChange={e => setLinkDescription(e.target.value)} placeholder="Brief description" style={inputStyle}
+                    onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                    onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                </Field>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <Field label="Clinic">
+                    <select value={linkClinic} onChange={e => { setLinkClinic(e.target.value as any); setLinkFolderId('') }} style={selectStyle}>
+                      {CLINICS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Folder (optional)">
+                    <select value={linkFolderId} onChange={e => setLinkFolderId(e.target.value)} style={selectStyle}>
+                      <option value="">— No folder —</option>
+                      {folders.filter(f => f.clinic === linkClinic || linkClinic === 'Both').map(f => (
+                        <option key={f.id} value={f.id}>{getFolderLabel(folders, f)}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                {linkMsg && (
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: linkMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', color: linkMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)', border: '1px solid ' + (linkMsg.startsWith('✓') ? '#bbf7d0' : '#fecaca') }}>
+                    {linkMsg}
+                  </div>
+                )}
+                <button type="submit" style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>Add Link</button>
+              </form>
+            </div>
+
+            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 14 }}>
+              All Links ({links.length})
+            </div>
+            {links.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)' }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>▶️</div>
+                <div style={{ fontSize: 14 }}>No video links yet</div>
+              </div>
+            ) : links.map(link => {
+              const folder = folders.find(f => f.id === link.folder_id)
+              return (
+                <div key={link.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ fontSize: 24, flexShrink: 0 }}>▶️</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{link.title}</div>
+                    {link.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>{link.description}</div>}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <Tag label={link.clinic} color={clinicColor(link.clinic)} />
+                      {folder && <Tag label={'📁 ' + getFolderLabel(folders, folder)} color="var(--muted)" />}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDeleteLink(link.id, link.title)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>
+                    Delete
+                  </button>
+                </div>
+              )
+            })}
           </div>
         )}
 
