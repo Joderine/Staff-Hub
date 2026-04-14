@@ -17,6 +17,96 @@ const SUGGESTIONS = [
   'What is the WiFi password?',
 ]
 
+function DocRow({ doc, clinicColor, onView, opening }: {
+  doc: Document
+  clinicColor: string
+  onView: (doc: Document) => void
+  opening: boolean
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: '#fafaf8', border: '1px solid #e8e6e0', borderRadius: 8, marginBottom: 6 }}>
+      <span style={{ fontSize: 16 }}>📄</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{doc.title}</div>
+        {doc.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{doc.description}</div>}
+      </div>
+      <button
+        onClick={() => onView(doc)}
+        disabled={opening}
+        style={{ background: clinicColor, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontFamily: "'DM Sans', sans-serif", cursor: 'pointer', opacity: opening ? 0.6 : 1, flexShrink: 0 }}
+      >
+        {opening ? '⏳' : 'View'}
+      </button>
+    </div>
+  )
+}
+
+function LinkRow({ link }: { link: Link }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, marginBottom: 6 }}>
+      <span style={{ fontSize: 16 }}>▶️</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{link.title}</div>
+        {link.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{link.description}</div>}
+      </div>
+      
+        href={link.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ background: '#ff0000', color: '#fff', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontFamily: "'DM Sans', sans-serif", cursor: 'pointer', flexShrink: 0, textDecoration: 'none', display: 'inline-block' }}
+      >
+        Watch
+      </a>
+    </div>
+  )
+}
+
+function FolderNode({ folder, folders, docs, links, clinicColor, expandedFolders, toggleFolder, onView, openingDoc }: {
+  folder: Folder
+  folders: Folder[]
+  docs: Document[]
+  links: Link[]
+  clinicColor: string
+  expandedFolders: Set<string>
+  toggleFolder: (id: string) => void
+  onView: (doc: Document) => void
+  openingDoc: string | null
+}) {
+  const subfolders = folders.filter(f => f.parent_id === folder.id)
+  const folderDocs = docs.filter(d => d.folder_id === folder.id)
+  const folderLinks = links.filter(l => l.folder_id === folder.id)
+  const isExpanded = expandedFolders.has(folder.id)
+  const isEmpty = subfolders.length === 0 && folderDocs.length === 0 && folderLinks.length === 0
+
+  return (
+    <div>
+      <button
+        onClick={() => toggleFolder(folder.id)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, marginBottom: 6, cursor: isEmpty ? 'default' : 'pointer', fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: '#1a1a2e', textAlign: 'left' }}
+      >
+        <span style={{ fontSize: 16 }}>{isExpanded ? '📂' : '📁'}</span>
+        <span style={{ flex: 1, fontWeight: 500 }}>{folder.name}</span>
+        {!isEmpty && <span style={{ fontSize: 12, color: '#9ca3af' }}>{isExpanded ? '▲' : '▼'}</span>}
+        {isEmpty && <span style={{ fontSize: 11, color: '#9ca3af' }}>Empty</span>}
+      </button>
+
+      {isExpanded && (
+        <div style={{ marginLeft: 16, marginBottom: 6 }}>
+          {subfolders.map(sf => (
+            <FolderNode key={sf.id} folder={sf} folders={folders} docs={docs} links={links} clinicColor={clinicColor} expandedFolders={expandedFolders} toggleFolder={toggleFolder} onView={onView} openingDoc={openingDoc} />
+          ))}
+          {folderDocs.map(doc => (
+            <DocRow key={doc.id} doc={doc} clinicColor={clinicColor} onView={onView} opening={openingDoc === doc.id} />
+          ))}
+          {folderLinks.map(link => (
+            <LinkRow key={link.id} link={link} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function StaffPortal({ profile, onSignOut }: Props) {
   const [tab, setTab] = useState<'ask' | 'docs'>('ask')
   const [docs, setDocs] = useState<Document[]>([])
@@ -40,17 +130,13 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
   async function loadFolders() {
     const res = await fetch('/api/admin/folders')
     const data = await res.json()
-    if (data.folders) {
-      setFolders(data.folders.filter((f: Folder) => f.clinic === profile.clinic))
-    }
+    if (data.folders) setFolders(data.folders.filter((f: Folder) => f.clinic === profile.clinic))
   }
 
   async function loadLinks() {
     const res = await fetch('/api/admin/links')
     const data = await res.json()
-    if (data.links) {
-      setLinks(data.links.filter((l: Link) => l.clinic === profile.clinic || l.clinic === 'Both'))
-    }
+    if (data.links) setLinks(data.links.filter((l: Link) => l.clinic === profile.clinic || l.clinic === 'Both'))
   }
 
   async function viewDoc(doc: Document) {
@@ -95,102 +181,9 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
     })
   }
 
+  const topLevelFolders = folders.filter(f => f.parent_id === null)
   const unfiledDocs = docs.filter(d => !d.folder_id && (d.clinic === profile.clinic || d.clinic === 'Both'))
   const unfiledLinks = links.filter(l => !l.folder_id)
-
-  function renderFolder(folder: Folder, depth = 0): React.ReactNode {
-    const subfolders = folders.filter(f => f.parent_id === folder.id)
-    const folderDocs = docs.filter(d => d.folder_id === folder.id && (d.clinic === profile.clinic || d.clinic === 'Both'))
-    const folderLinks = links.filter(l => l.folder_id === folder.id)
-    const isExpanded = expandedFolders.has(folder.id)
-    const isEmpty = subfolders.length === 0 && folderDocs.length === 0 && folderLinks.length === 0
-
-    return (
-      <div key={folder.id} style={{ marginLeft: depth * 16 }}>
-        <button
-          onClick={() => toggleFolder(folder.id)}
-          style={{
-            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-            padding: '11px 16px', background: '#fff', border: '1px solid #e8e6e0',
-            borderRadius: 10, marginBottom: 6, cursor: isEmpty ? 'default' : 'pointer',
-            fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: '#1a1a2e', textAlign: 'left',
-          }}
-        >
-          <span style={{ fontSize: 16 }}>{isExpanded ? '📂' : '📁'}</span>
-          <span style={{ flex: 1, fontWeight: 500 }}>{folder.name}</span>
-          {!isEmpty && <span style={{ fontSize: 12, color: '#9ca3af' }}>{isExpanded ? '▲' : '▼'}</span>}
-          {isEmpty && <span style={{ fontSize: 11, color: '#9ca3af' }}>Empty</span>}
-        </button>
-
-        {isExpanded && (
-          <div style={{ marginBottom: 6 }}>
-            {subfolders.map(sf => renderFolder(sf, depth + 1))}
-            {folderDocs.map(doc => renderDocRow(doc, depth + 1))}
-            {folderLinks.map(link => renderLinkRow(link, depth + 1))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  function renderDocRow(doc: Document, depth = 0): React.ReactNode {
-    return (
-      <div key={doc.id} style={{
-        marginLeft: depth * 16, display: 'flex', alignItems: 'center', gap: 12,
-        padding: '10px 16px', background: '#fafaf8', border: '1px solid #e8e6e0',
-        borderRadius: 8, marginBottom: 6,
-      }}>
-        <span style={{ fontSize: 16 }}>📄</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{doc.title}</div>
-          {doc.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{doc.description}</div>}
-        </div>
-        <button
-          onClick={() => viewDoc(doc)}
-          disabled={openingDoc === doc.id}
-          style={{
-            background: clinicColor, color: '#fff', border: 'none',
-            borderRadius: 8, padding: '7px 14px', fontSize: 12,
-            fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
-            opacity: openingDoc === doc.id ? 0.6 : 1, flexShrink: 0,
-          }}
-        >
-          {openingDoc === doc.id ? '⏳' : 'View'}
-        </button>
-      </div>
-    )
-  }
-
-  function renderLinkRow(link: Link, depth = 0): React.ReactNode {
-    return (
-      <div key={link.id} style={{
-        marginLeft: depth * 16, display: 'flex', alignItems: 'center', gap: 12,
-        padding: '10px 16px', background: '#f0f9ff', border: '1px solid #bae6fd',
-        borderRadius: 8, marginBottom: 6,
-      }}>
-        <span style={{ fontSize: 16 }}>▶️</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{link.title}</div>
-          {link.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{link.description}</div>}
-        </div>
-        
-          href={link.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            background: '#ff0000', color: '#fff', border: 'none',
-            borderRadius: 8, padding: '7px 14px', fontSize: 12,
-            fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
-            flexShrink: 0, textDecoration: 'none', display: 'inline-block',
-          }}
-        >
-          Watch
-        </a>
-      </div>
-    )
-  }
-
-  const topLevelFolders = folders.filter(f => f.parent_id === null)
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f6f2' }}>
@@ -227,11 +220,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
               <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#9ca3af', marginBottom: 10 }}>Common questions</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {SUGGESTIONS.map((s, i) => (
-                  <button key={i} onClick={() => ask(s)} style={{
-                    background: '#fff', border: '1px solid #e8e6e0', borderRadius: 20,
-                    padding: '7px 14px', fontSize: 12, color: '#6b7280', cursor: 'pointer',
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}>{s}</button>
+                  <button key={i} onClick={() => ask(s)} style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 20, padding: '7px 14px', fontSize: 12, color: '#6b7280', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }}>{s}</button>
                 ))}
               </div>
             </div>
@@ -296,12 +285,14 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
               </div>
             ) : (
               <div>
-                {topLevelFolders.map(f => renderFolder(f))}
+                {topLevelFolders.map(f => (
+                  <FolderNode key={f.id} folder={f} folders={folders} docs={docs} links={links} clinicColor={clinicColor} expandedFolders={expandedFolders} toggleFolder={toggleFolder} onView={viewDoc} openingDoc={openingDoc} />
+                ))}
                 {(unfiledDocs.length > 0 || unfiledLinks.length > 0) && (
                   <div style={{ marginTop: topLevelFolders.length > 0 ? 20 : 0 }}>
                     <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9ca3af', marginBottom: 10 }}>Other</div>
-                    {unfiledDocs.map(doc => renderDocRow(doc))}
-                    {unfiledLinks.map(link => renderLinkRow(link))}
+                    {unfiledDocs.map(doc => <DocRow key={doc.id} doc={doc} clinicColor={clinicColor} onView={viewDoc} opening={openingDoc === doc.id} />)}
+                    {unfiledLinks.map(link => <LinkRow key={link.id} link={link} />)}
                   </div>
                 )}
               </div>
