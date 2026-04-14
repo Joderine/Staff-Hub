@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { StaffProfile, Document } from '@/lib/types'
 
 interface Folder { id: string; name: string; clinic: string; parent_id: string | null }
+interface Link { id: string; title: string; url: string; description: string; clinic: string; folder_id: string | null }
 interface Props { profile: StaffProfile; onSignOut: () => void }
 interface Message { role: 'user' | 'assistant'; content: string }
 
@@ -20,6 +21,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
   const [tab, setTab] = useState<'ask' | 'docs'>('ask')
   const [docs, setDocs] = useState<Document[]>([])
   const [folders, setFolders] = useState<Folder[]>([])
+  const [links, setLinks] = useState<Link[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,7 +30,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const clinicColor = profile.clinic === 'MAH' ? '#2a5f8f' : '#7c3aed'
 
-  useEffect(() => { loadDocs(); loadFolders() }, [])
+  useEffect(() => { loadDocs(); loadFolders(); loadLinks() }, [])
 
   async function loadDocs() {
     const { data } = await supabase.from('documents').select('*').order('title')
@@ -40,6 +42,14 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
     const data = await res.json()
     if (data.folders) {
       setFolders(data.folders.filter((f: Folder) => f.clinic === profile.clinic))
+    }
+  }
+
+  async function loadLinks() {
+    const res = await fetch('/api/admin/links')
+    const data = await res.json()
+    if (data.links) {
+      setLinks(data.links.filter((l: Link) => l.clinic === profile.clinic || l.clinic === 'Both'))
     }
   }
 
@@ -85,18 +95,15 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
     })
   }
 
-  // Unfiled docs (no folder_id, matching clinic)
-  const unfiledDocs = docs.filter(d =>
-    !d.folder_id && (d.clinic === profile.clinic || d.clinic === 'Both')
-  )
+  const unfiledDocs = docs.filter(d => !d.folder_id && (d.clinic === profile.clinic || d.clinic === 'Both'))
+  const unfiledLinks = links.filter(l => !l.folder_id)
 
   function renderFolder(folder: Folder, depth = 0): React.ReactNode {
     const subfolders = folders.filter(f => f.parent_id === folder.id)
-    const folderDocs = docs.filter(d =>
-      d.folder_id === folder.id && (d.clinic === profile.clinic || d.clinic === 'Both')
-    )
+    const folderDocs = docs.filter(d => d.folder_id === folder.id && (d.clinic === profile.clinic || d.clinic === 'Both'))
+    const folderLinks = links.filter(l => l.folder_id === folder.id)
     const isExpanded = expandedFolders.has(folder.id)
-    const isEmpty = subfolders.length === 0 && folderDocs.length === 0
+    const isEmpty = subfolders.length === 0 && folderDocs.length === 0 && folderLinks.length === 0
 
     return (
       <div key={folder.id} style={{ marginLeft: depth * 16 }}>
@@ -111,9 +118,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
         >
           <span style={{ fontSize: 16 }}>{isExpanded ? '📂' : '📁'}</span>
           <span style={{ flex: 1, fontWeight: 500 }}>{folder.name}</span>
-          {!isEmpty && (
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>{isExpanded ? '▲' : '▼'}</span>
-          )}
+          {!isEmpty && <span style={{ fontSize: 12, color: '#9ca3af' }}>{isExpanded ? '▲' : '▼'}</span>}
           {isEmpty && <span style={{ fontSize: 11, color: '#9ca3af' }}>Empty</span>}
         </button>
 
@@ -121,6 +126,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
           <div style={{ marginBottom: 6 }}>
             {subfolders.map(sf => renderFolder(sf, depth + 1))}
             {folderDocs.map(doc => renderDocRow(doc, depth + 1))}
+            {folderLinks.map(link => renderLinkRow(link, depth + 1))}
           </div>
         )}
       </div>
@@ -155,6 +161,35 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
     )
   }
 
+  function renderLinkRow(link: Link, depth = 0): React.ReactNode {
+    return (
+      <div key={link.id} style={{
+        marginLeft: depth * 16, display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 16px', background: '#f0f9ff', border: '1px solid #bae6fd',
+        borderRadius: 8, marginBottom: 6,
+      }}>
+        <span style={{ fontSize: 16 }}>▶️</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{link.title}</div>
+          {link.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{link.description}</div>}
+        </div>
+        
+          href={link.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            background: '#ff0000', color: '#fff', border: 'none',
+            borderRadius: 8, padding: '7px 14px', fontSize: 12,
+            fontFamily: "'DM Sans', sans-serif", cursor: 'pointer',
+            flexShrink: 0, textDecoration: 'none', display: 'inline-block',
+          }}
+        >
+          Watch
+        </a>
+      </div>
+    )
+  }
+
   const topLevelFolders = folders.filter(f => f.parent_id === null)
 
   return (
@@ -180,7 +215,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
             color: tab === t ? '#2a5f8f' : '#6b7280',
             borderBottom: tab === t ? '2px solid #2a5f8f' : '2px solid transparent',
             cursor: 'pointer',
-          }}>{t === 'ask' ? 'Ask a Question' : 'Documents'}</button>
+          }}>{t === 'ask' ? 'Ask a Question' : 'Documents & Videos'}</button>
         ))}
       </div>
 
@@ -213,66 +248,4 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
                 <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
                     background: m.role === 'user' ? clinicColor : '#fff',
-                    border: `1px solid ${m.role === 'user' ? 'transparent' : '#e8e6e0'}`,
-                    borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                    padding: '12px 16px', maxWidth: '85%',
-                    color: m.role === 'user' ? '#fff' : '#1a1a2e',
-                    fontSize: 14, lineHeight: 1.65, whiteSpace: 'pre-wrap',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                  }}>{m.content}</div>
-                </div>
-              ))}
-              {loading && (
-                <div style={{ display: 'flex' }}>
-                  <div style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: '16px 16px 16px 4px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #e8e6e020', borderTopColor: '#2a5f8f', animation: 'spin 0.65s linear infinite' }} />
-                    <span style={{ fontSize: 13, color: '#6b7280' }}>Searching documents…</span>
-                  </div>
-                </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, paddingTop: 14, borderTop: '1px solid #e8e6e0' }}>
-              <input
-                style={{ flex: 1, background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, color: '#1a1a2e', fontFamily: "'DM Sans', sans-serif", fontSize: 14, padding: '11px 16px', outline: 'none' }}
-                placeholder="Type your question…"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); ask() } }}
-                onFocus={e => (e.target.style.borderColor = '#2a5f8f')}
-                onBlur={e => (e.target.style.borderColor = '#e8e6e0')}
-              />
-              <button onClick={() => ask()} disabled={!input.trim() || loading} style={{
-                background: '#2a5f8f', color: '#fff', border: 'none', borderRadius: 10,
-                padding: '11px 22px', fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 500,
-                cursor: 'pointer', opacity: (!input.trim() || loading) ? 0.4 : 1,
-              }}>Ask</button>
-            </div>
-          </div>
-        )}
-
-        {tab === 'docs' && (
-          <div>
-            {topLevelFolders.length === 0 && unfiledDocs.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>📂</div>
-                <div style={{ fontSize: 14, color: '#6b7280' }}>No documents yet</div>
-              </div>
-            ) : (
-              <div>
-                {topLevelFolders.map(f => renderFolder(f))}
-                {unfiledDocs.length > 0 && (
-                  <div style={{ marginTop: topLevelFolders.length > 0 ? 20 : 0 }}>
-                    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9ca3af', marginBottom: 10 }}>Other Documents</div>
-                    {unfiledDocs.map(doc => renderDocRow(doc))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
+                    border: `1px solid ${
