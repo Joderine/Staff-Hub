@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
     const description = formData.get('description') as string
     const category = formData.get('category') as string
     const clinic = formData.get('clinic') as string
+    const folder_id = formData.get('folder_id') as string | null
 
     if (!file || !title || !clinic) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -23,7 +24,6 @@ export async function POST(req: NextRequest) {
     const { error: storageError } = await supabase.storage
       .from('staff-docs')
       .upload(storagePath, buffer, { contentType: 'application/pdf', upsert: false })
-
     if (storageError) throw new Error('Storage upload failed: ' + storageError.message)
 
     const { data, error: dbError } = await supabase.from('documents').insert({
@@ -33,10 +33,10 @@ export async function POST(req: NextRequest) {
       description: description || '',
       category: category || 'General',
       clinic,
+      folder_id: folder_id || null,
     }).select().single()
 
     if (dbError) throw new Error('DB error: ' + dbError.message)
-
     return NextResponse.json({ document: data })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
