@@ -248,4 +248,67 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
                 <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
                     background: m.role === 'user' ? clinicColor : '#fff',
-                    border: `1px solid ${
+                    border: `1px solid ${m.role === 'user' ? 'transparent' : '#e8e6e0'}`,
+                    borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                    padding: '12px 16px', maxWidth: '85%',
+                    color: m.role === 'user' ? '#fff' : '#1a1a2e',
+                    fontSize: 14, lineHeight: 1.65, whiteSpace: 'pre-wrap',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                  }}>{m.content}</div>
+                </div>
+              ))}
+              {loading && (
+                <div style={{ display: 'flex' }}>
+                  <div style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: '16px 16px 16px 4px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #e8e6e020', borderTopColor: '#2a5f8f', animation: 'spin 0.65s linear infinite' }} />
+                    <span style={{ fontSize: 13, color: '#6b7280' }}>Searching documents…</span>
+                  </div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, paddingTop: 14, borderTop: '1px solid #e8e6e0' }}>
+              <input
+                style={{ flex: 1, background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, color: '#1a1a2e', fontFamily: "'DM Sans', sans-serif", fontSize: 14, padding: '11px 16px', outline: 'none' }}
+                placeholder="Type your question…"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); ask() } }}
+                onFocus={e => (e.target.style.borderColor = '#2a5f8f')}
+                onBlur={e => (e.target.style.borderColor = '#e8e6e0')}
+              />
+              <button onClick={() => ask()} disabled={!input.trim() || loading} style={{
+                background: '#2a5f8f', color: '#fff', border: 'none', borderRadius: 10,
+                padding: '11px 22px', fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 500,
+                cursor: 'pointer', opacity: (!input.trim() || loading) ? 0.4 : 1,
+              }}>Ask</button>
+            </div>
+          </div>
+        )}
+
+        {tab === 'docs' && (
+          <div>
+            {topLevelFolders.length === 0 && unfiledDocs.length === 0 && unfiledLinks.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>📂</div>
+                <div style={{ fontSize: 14, color: '#6b7280' }}>No documents yet</div>
+              </div>
+            ) : (
+              <div>
+                {topLevelFolders.map(f => renderFolder(f))}
+                {(unfiledDocs.length > 0 || unfiledLinks.length > 0) && (
+                  <div style={{ marginTop: topLevelFolders.length > 0 ? 20 : 0 }}>
+                    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#9ca3af', marginBottom: 10 }}>Other</div>
+                    {unfiledDocs.map(doc => renderDocRow(doc))}
+                    {unfiledLinks.map(link => renderLinkRow(link))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
