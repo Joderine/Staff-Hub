@@ -44,7 +44,7 @@ function DocRow({ doc, clinicColor, onView, opening }: {
 function LinkRow({ link }: { link: Link }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, marginBottom: 6 }}>
-      <span style={{ fontSize: 16, color: '#ff0000' }}>&#9654;</span>
+      <span style={{ fontSize: 16, color: '#ff0000' }}>{'>'}</span>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{link.title}</div>
         {link.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{link.description}</div>}
