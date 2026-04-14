@@ -25,7 +25,7 @@ function DocRow({ doc, clinicColor, onView, opening }: {
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: '#fafaf8', border: '1px solid #e8e6e0', borderRadius: 8, marginBottom: 6 }}>
-      <span style={{ fontSize: 16 }}>📄</span>
+      <span style={{ fontSize: 16 }}>{'doc'}</span>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{doc.title}</div>
         {doc.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{doc.description}</div>}
