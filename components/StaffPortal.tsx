@@ -25,7 +25,7 @@ function DocRow({ doc, clinicColor, onView, opening }: {
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: '#fafaf8', border: '1px solid #e8e6e0', borderRadius: 8, marginBottom: 6 }}>
-      <span style={{ fontSize: 16 }}>PDF</span>
+      <span style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', background: '#e8e6e0', padding: '2px 6px', borderRadius: 4 }}>PDF</span>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{doc.title}</div>
         {doc.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{doc.description}</div>}
@@ -35,7 +35,7 @@ function DocRow({ doc, clinicColor, onView, opening }: {
         disabled={opening}
         style={{ background: clinicColor, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontFamily: "'DM Sans', sans-serif", cursor: 'pointer', opacity: opening ? 0.6 : 1, flexShrink: 0 }}
       >
-        {opening ? 'Loading' : 'View'}
+        {opening ? 'Loading...' : 'View'}
       </button>
     </div>
   )
@@ -44,12 +44,12 @@ function DocRow({ doc, clinicColor, onView, opening }: {
 function LinkRow({ link }: { link: Link }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, marginBottom: 6 }}>
-      <span style={{ fontSize: 14, fontWeight: 700, color: '#ff0000' }}>VIDEO</span>
+      <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: '#ff0000', padding: '2px 6px', borderRadius: 4 }}>VIDEO</span>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14 }}>{link.title}</div>
         {link.description && <div style={{ fontSize: 12, color: '#6b7280' }}>{link.description}</div>}
       </div>
-      
+      <a
         href={link.url}
         target="_blank"
         rel="noopener noreferrer"
@@ -84,7 +84,7 @@ function FolderNode({ folder, folders, docs, links, clinicColor, expandedFolders
         onClick={() => toggleFolder(folder.id)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, marginBottom: 6, cursor: isEmpty ? 'default' : 'pointer', fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: '#1a1a2e', textAlign: 'left' }}
       >
-        <span style={{ fontSize: 16 }}>{isExpanded ? 'v' : '>'}</span>
+        <span style={{ fontSize: 14, color: '#6b7280' }}>{isExpanded ? '[open]' : '[+]'}</span>
         <span style={{ flex: 1, fontWeight: 500 }}>{folder.name}</span>
         {isEmpty && <span style={{ fontSize: 11, color: '#9ca3af' }}>Empty</span>}
       </button>
@@ -227,9 +227,9 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
             <div style={{ minHeight: 300, maxHeight: 460, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 16 }}>
               {messages.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
-                  <div style={{ fontSize: 36, marginBottom: 12 }}>💬</div>
+                  <div style={{ fontSize: 36, marginBottom: 12 }}>---</div>
                   <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 15, color: '#6b7280', marginBottom: 6 }}>Ask anything about {profile.clinic}</div>
-                  <div style={{ fontSize: 13 }}>Procedures, contacts, protocols — all in one place</div>
+                  <div style={{ fontSize: 13 }}>Procedures, contacts, protocols - all in one place</div>
                 </div>
               )}
               {messages.map((m, i) => (
@@ -248,7 +248,7 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
               {loading && (
                 <div style={{ display: 'flex' }}>
                   <div style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: '16px 16px 16px 4px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #e8e6e020', borderTopColor: '#2a5f8f', animation: 'spin 0.65s linear infinite' }} />
+                    <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #e8e6e0', borderTopColor: '#2a5f8f', animation: 'spin 0.65s linear infinite' }} />
                     <span style={{ fontSize: 13, color: '#6b7280' }}>Searching documents...</span>
                   </div>
                 </div>
@@ -279,7 +279,6 @@ export default function StaffPortal({ profile, onSignOut }: Props) {
           <div>
             {topLevelFolders.length === 0 && unfiledDocs.length === 0 && unfiledLinks.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>No content yet</div>
                 <div style={{ fontSize: 14, color: '#6b7280' }}>No documents or videos yet</div>
               </div>
             ) : (
