@@ -1,5 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import Anthropic from '@anthropic-ai/sdk'
+
+// Split text into overlapping chunks
+function chunkText(text: string, chunkSize = 500, overlap = 50): string[] {
+  const words = text.split(/\s+/)
+  const chunks: string[] = []
+  let i = 0
+  while (i < words.length) {
+    const chunk = words.slice(i, i + chunkSize).join(' ')
+    if (chunk.trim().length > 50) chunks.push(chunk.trim())
+    i += chunkSize - overlap
+  }
+  return chunks
+}
+
+// Extract readable text from PDF buffer
+function extractText(buffer: Buffer): string {
+  const raw = buffer.toString('latin1')
+  return raw
+    .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,26 +41,93 @@ export async function POST(req: NextRequest) {
     const supabase = createServiceClient()
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
+
+    // Upload file to storage
     const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
     const storagePath = `${Date.now()}-${safeName}`
 
     const { error: storageError } = await supabase.storage
       .from('staff-docs')
       .upload(storagePath, buffer, { contentType: 'application/pdf', upsert: false })
+
     if (storageError) throw new Error('Storage upload failed: ' + storageError.message)
 
-    const { data, error: dbError } = await supabase.from('documents').insert({
-      file_name: file.name,
-      storage_path: storagePath,
-      title,
-      description: description || '',
-      category: category || 'General',
-      clinic,
-      folder_id: folder_id || null,
-    }).select().single()
+    // Save document record
+    const { data, error: dbError } = await supabase
+      .from('documents')
+      .insert({
+        file_name: file.name,
+        storage_path: storagePath,
+        title,
+        description: description || '',
+        category: category || 'General',
+        clinic,
+        folder_id: folder_id || null,
+      })
+      .select()
+      .single()
 
     if (dbError) throw new Error('DB error: ' + dbError.message)
+
+    // Extract text and create embeddings
+    try {
+      const apiKey = process.env.ANTHROPIC_API_KEY
+      if (!apiKey) throw new Error('No API key')
+
+      const anthropic = new Anthropic({ apiKey: apiKey.trim() })
+
+      // Extract text from PDF
+      const text = extractText(buffer)
+
+      if (text.length > 100) {
+        // Split into chunks
+        const chunks = chunkText(text)
+
+        // Get embeddings for each chunk from Voyage AI via Anthropic
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i]
+
+          // Use Claude to generate a simple embedding via text similarity
+          // We'll store chunks without embeddings first, then embed via voyage
+          const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.VOYAGE_API_KEY}`,
+            },
+            body: JSON.stringify({
+              model: 'voyage-2',
+              input: chunk,
+            }),
+          })
+
+          if (!embeddingResponse.ok) {
+            console.error('Embedding failed for chunk', i)
+            continue
+          }
+
+          const embeddingData = await embeddingResponse.json()
+          const embedding = embeddingData.data?.[0]?.embedding
+
+          if (!embedding) continue
+
+          await supabase.from('document_chunks').insert({
+            document_id: data.id,
+            clinic,
+            title,
+            chunk_text: chunk,
+            embedding: JSON.stringify(embedding),
+            chunk_index: i,
+          })
+        }
+      }
+    } catch (embeddingErr: any) {
+      // Don't fail the upload if embedding fails — just log it
+      console.error('Embedding error (non-fatal):', embeddingErr.message)
+    }
+
     return NextResponse.json({ document: data })
+
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
