@@ -28,6 +28,8 @@ const inputStyle: React.CSSProperties = { width: '100%', background: 'var(--bg)'
 const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' }
 const primaryBtn: React.CSSProperties = { width: '100%', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 20px', fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }
 const ghostBtn: React.CSSProperties = { background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 14px', fontSize: 13, color: 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }
+const editBtn: React.CSSProperties = { background: 'var(--accent-soft)', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }
+const deleteBtn: React.CSSProperties = { background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }
 
 function clinicColor(c: string) {
   return c === 'MAH' ? 'var(--mah)' : c === 'HPVC' ? 'var(--hpvc)' : 'var(--green)'
@@ -38,17 +40,18 @@ function getFolderLabel(folders: Folder[], f: Folder): string {
   const parent = folders.find(p => p.id === f.parent_id)
   if (!parent) return f.name
   const grandparent = folders.find(g => g.id === parent.parent_id)
-  if (grandparent) return `${grandparent.name} → ${parent.name} → ${f.name}`
-  return `${parent.name} → ${f.name}`
+  if (grandparent) return grandparent.name + ' > ' + parent.name + ' > ' + f.name
+  return parent.name + ' > ' + f.name
 }
 
-function FolderTree({ folders, docs, parentId, clinic, depth, onDelete }: {
+function FolderTree({ folders, docs, parentId, clinic, depth, onDelete, onEdit }: {
   folders: Folder[]
   docs: Document[]
   parentId: string | null
   clinic: string
   depth: number
   onDelete: (id: string, name: string) => void
+  onEdit: (folder: Folder) => void
 }) {
   const children = folders.filter(f => f.parent_id === parentId && f.clinic === clinic)
   if (children.length === 0) return null
@@ -57,16 +60,15 @@ function FolderTree({ folders, docs, parentId, clinic, depth, onDelete }: {
       {children.map(f => (
         <div key={f.id}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6, marginLeft: depth * 20 }}>
-            <span>{depth === 0 ? '📁' : '📂'}</span>
-            <span style={{ flex: 1, fontSize: 14, fontFamily: "'DM Sans', sans-serif" }}>{f.name}</span>
+            <span style={{ fontSize: 14 }}>Folder</span>
+            <span style={{ flex: 1, fontSize: 14, fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>{f.name}</span>
             <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: "'DM Mono', monospace" }}>
               {docs.filter(d => d.folder_id === f.id).length} docs
             </span>
-            <button onClick={() => onDelete(f.id, f.name)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 6, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}>
-              Delete
-            </button>
+            <button onClick={() => onEdit(f)} style={editBtn}>Edit</button>
+            <button onClick={() => onDelete(f.id, f.name)} style={deleteBtn}>Delete</button>
           </div>
-          <FolderTree folders={folders} docs={docs} parentId={f.id} clinic={clinic} depth={depth + 1} onDelete={onDelete} />
+          <FolderTree folders={folders} docs={docs} parentId={f.id} clinic={clinic} depth={depth + 1} onDelete={onDelete} onEdit={onEdit} />
         </div>
       ))}
     </>
@@ -81,6 +83,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
   const [links, setLinks] = useState<Link[]>([])
   const [loading, setLoading] = useState(false)
 
+  // Upload state
   const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -90,6 +93,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
   const [uploadMsg, setUploadMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Staff state
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteName, setInviteName] = useState('')
   const [inviteClinic, setInviteClinic] = useState<'MAH' | 'HPVC' | 'Both'>('MAH')
@@ -97,17 +101,24 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
   const [invitePassword, setInvitePassword] = useState('')
   const [inviteMsg, setInviteMsg] = useState('')
 
+  // Folder state
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderClinic, setNewFolderClinic] = useState<'MAH' | 'HPVC'>('MAH')
   const [newFolderParent, setNewFolderParent] = useState<string>('')
   const [folderMsg, setFolderMsg] = useState('')
 
+  // Link state
   const [linkTitle, setLinkTitle] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
   const [linkDescription, setLinkDescription] = useState('')
   const [linkClinic, setLinkClinic] = useState<'MAH' | 'HPVC' | 'Both'>('Both')
   const [linkFolderId, setLinkFolderId] = useState<string>('')
   const [linkMsg, setLinkMsg] = useState('')
+
+  // Edit states
+  const [editingDoc, setEditingDoc] = useState<Document | null>(null)
+  const [editingFolder, setEditingFolder] = useState<Folder | null>(null)
+  const [editingLink, setEditingLink] = useState<Link | null>(null)
 
   useEffect(() => { loadDocs(); loadStaff(); loadFolders(); loadLinks() }, [])
 
@@ -152,9 +163,9 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
       setDocs(prev => [data.document, ...prev])
       setTitle(''); setDescription(''); setFile(null); setFolderId('')
       if (fileRef.current) fileRef.current.value = ''
-      setUploadMsg('✓ Document uploaded successfully')
+      setUploadMsg('Uploaded successfully')
     } else {
-      setUploadMsg('✕ Error: ' + data.error)
+      setUploadMsg('Error: ' + data.error)
     }
     setLoading(false)
   }
@@ -169,10 +180,32 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     setDocs(prev => prev.filter(d => d.id !== doc.id))
   }
 
+  async function handleSaveDoc(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editingDoc) return
+    const res = await fetch('/api/admin/documents', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: editingDoc.id,
+        title: editingDoc.title,
+        description: editingDoc.description,
+        category: editingDoc.category,
+        clinic: editingDoc.clinic,
+        folder_id: editingDoc.folder_id || null
+      })
+    })
+    const data = await res.json()
+    if (data.document) {
+      setDocs(prev => prev.map(d => d.id === data.document.id ? data.document : d))
+      setEditingDoc(null)
+    }
+  }
+
   async function handleAddStaff(e: React.FormEvent) {
     e.preventDefault()
     if (!invitePassword || invitePassword.length < 8) {
-      setInviteMsg('✕ Password must be at least 8 characters')
+      setInviteMsg('Password must be at least 8 characters')
       return
     }
     setLoading(true)
@@ -184,11 +217,11 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     })
     const data = await res.json()
     if (data.success) {
-      setInviteMsg('✓ ' + inviteName + ' added. They can log in at staff-hub-sigma.vercel.app')
+      setInviteMsg(inviteName + ' added successfully')
       setInviteEmail(''); setInviteName(''); setInvitePassword('')
       loadStaff()
     } else {
-      setInviteMsg('✕ Error: ' + data.error)
+      setInviteMsg('Error: ' + data.error)
     }
     setLoading(false)
   }
@@ -216,9 +249,25 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     if (data.folder) {
       setFolders(prev => [...prev, data.folder])
       setNewFolderName(''); setNewFolderParent('')
-      setFolderMsg('✓ Folder created')
+      setFolderMsg('Folder created')
     } else {
-      setFolderMsg('✕ Error: ' + data.error)
+      setFolderMsg('Error: ' + data.error)
+    }
+  }
+
+  async function handleSaveFolder(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editingFolder) return
+    const res = await fetch('/api/admin/folders', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editingFolder.id, name: editingFolder.name, parent_id: editingFolder.parent_id || null })
+    })
+    const data = await res.json()
+    if (data.folder) {
+      setFolders(prev => prev.map(f => f.id === data.folder.id ? data.folder : f))
+      setEditingFolder(null)
+      setFolderMsg('Folder updated')
     }
   }
 
@@ -245,9 +294,31 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     if (data.link) {
       setLinks(prev => [data.link, ...prev])
       setLinkTitle(''); setLinkUrl(''); setLinkDescription(''); setLinkFolderId('')
-      setLinkMsg('✓ Link added successfully')
+      setLinkMsg('Link added successfully')
     } else {
-      setLinkMsg('✕ Error: ' + data.error)
+      setLinkMsg('Error: ' + data.error)
+    }
+  }
+
+  async function handleSaveLink(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editingLink) return
+    const res = await fetch('/api/admin/links', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: editingLink.id,
+        title: editingLink.title,
+        url: editingLink.url,
+        description: editingLink.description,
+        clinic: editingLink.clinic,
+        folder_id: editingLink.folder_id || null
+      })
+    })
+    const data = await res.json()
+    if (data.link) {
+      setLinks(prev => prev.map(l => l.id === data.link.id ? data.link : l))
+      setEditingLink(null)
     }
   }
 
@@ -259,6 +330,14 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
       body: JSON.stringify({ id })
     })
     setLinks(prev => prev.filter(l => l.id !== id))
+  }
+
+  const editPanelStyle: React.CSSProperties = {
+    background: '#f0f7ff',
+    border: '2px solid var(--accent)',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 10
   }
 
   return (
@@ -286,6 +365,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
 
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 24px' }}>
 
+        {/* DOCUMENTS TAB */}
         {tab === 'docs' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -294,34 +374,109 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
             </div>
             {docs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>📂</div>
                 <div style={{ fontSize: 14, color: 'var(--muted)' }}>No documents yet</div>
               </div>
             ) : docs.map(doc => {
               const folder = folders.find(f => f.id === doc.folder_id)
+              const isEditing = editingDoc?.id === doc.id
               return (
-                <div key={doc.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{doc.title}</div>
-                    {doc.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>{doc.description}</div>}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <Tag label={doc.category} color="var(--accent)" />
-                      <Tag label={doc.clinic} color={clinicColor(doc.clinic)} />
-                      {folder && <Tag label={'📁 ' + getFolderLabel(folders, folder)} color="var(--muted)" />}
+                <div key={doc.id}>
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', marginBottom: isEditing ? 0 : 10, display: 'flex', alignItems: 'center', gap: 14, borderBottomLeftRadius: isEditing ? 0 : 12, borderBottomRightRadius: isEditing ? 0 : 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{doc.title}</div>
+                      {doc.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>{doc.description}</div>}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <Tag label={doc.category} color="var(--accent)" />
+                        <Tag label={doc.clinic} color={clinicColor(doc.clinic)} />
+                        {folder && <Tag label={'Folder: ' + getFolderLabel(folders, folder)} color="var(--muted)" />}
+                      </div>
                     </div>
+                    <button onClick={() => setEditingDoc(isEditing ? null : { ...doc })} style={editBtn}>
+                      {isEditing ? 'Cancel' : 'Edit'}
+                    </button>
+                    <button onClick={() => handleDelete(doc)} style={deleteBtn}>Delete</button>
                   </div>
-                  <button onClick={() => handleDelete(doc)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>
-                    Delete
-                  </button>
+                  {isEditing && editingDoc && (
+                    <div style={{ ...editPanelStyle, borderTopLeftRadius: 0, borderTopRightRadius: 0, marginBottom: 10 }}>
+                      <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 16, color: 'var(--accent)' }}>Edit Document</div>
+                      <form onSubmit={handleSaveDoc}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                          <Field label="Title">
+                            <input value={editingDoc.title} onChange={e => setEditingDoc({ ...editingDoc, title: e.target.value })} style={inputStyle} required
+                              onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                              onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                          </Field>
+                          <Field label="Category">
+                            <select value={editingDoc.category} onChange={e => setEditingDoc({ ...editingDoc, category: e.target.value })} style={selectStyle}>
+                              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          </Field>
+                          <Field label="Clinic">
+                            <select value={editingDoc.clinic} onChange={e => setEditingDoc({ ...editingDoc, clinic: e.target.value as any, folder_id: null })} style={selectStyle}>
+                              {CLINICS.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          </Field>
+                          <Field label="Folder">
+                            <select value={editingDoc.folder_id || ''} onChange={e => setEditingDoc({ ...editingDoc, folder_id: e.target.value || null })} style={selectStyle}>
+                              <option value="">No folder</option>
+                              {folders.filter(f => f.clinic === editingDoc.clinic || editingDoc.clinic === 'Both').map(f => (
+                                <option key={f.id} value={f.id}>{getFolderLabel(folders, f)}</option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
+                        <Field label="Description">
+                          <input value={editingDoc.description || ''} onChange={e => setEditingDoc({ ...editingDoc, description: e.target.value })} style={inputStyle}
+                            onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                            onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                        </Field>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <button type="submit" style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>Save Changes</button>
+                          <button type="button" onClick={() => setEditingDoc(null)} style={ghostBtn}>Cancel</button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
                 </div>
               )
             })}
           </div>
         )}
 
+        {/* FOLDERS TAB */}
         {tab === 'folders' && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Manage Folders</div>
+
+            {/* Edit folder panel */}
+            {editingFolder && (
+              <div style={{ ...editPanelStyle, marginBottom: 24 }}>
+                <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 16, color: 'var(--accent)' }}>Edit Folder</div>
+                <form onSubmit={handleSaveFolder}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                    <Field label="Folder Name">
+                      <input value={editingFolder.name} onChange={e => setEditingFolder({ ...editingFolder, name: e.target.value })} required style={inputStyle}
+                        onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                        onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                    </Field>
+                    <Field label="Parent Folder">
+                      <select value={editingFolder.parent_id || ''} onChange={e => setEditingFolder({ ...editingFolder, parent_id: e.target.value || null })} style={selectStyle}>
+                        <option value="">Top level folder</option>
+                        {folders.filter(f => f.clinic === editingFolder.clinic && f.id !== editingFolder.id).map(f => (
+                          <option key={f.id} value={f.id}>{getFolderLabel(folders, f)}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button type="submit" style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>Save Changes</button>
+                    <button type="button" onClick={() => setEditingFolder(null)} style={ghostBtn}>Cancel</button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Create folder form */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, marginBottom: 28 }}>
               <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 18 }}>Create New Folder</div>
               <form onSubmit={handleCreateFolder}>
@@ -338,26 +493,27 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                     </select>
                   </Field>
                 </div>
-                <Field label="Parent Folder (optional — leave blank for top-level)">
+                <Field label="Parent Folder (optional)">
                   <select value={newFolderParent} onChange={e => setNewFolderParent(e.target.value)} style={selectStyle}>
-                    <option value="">— Top level folder —</option>
+                    <option value="">Top level folder</option>
                     {folders.filter(f => f.clinic === newFolderClinic && f.parent_id === null).map(f => (
                       <option key={f.id} value={f.id}>{f.name}</option>
                     ))}
                     {folders.filter(f => f.clinic === newFolderClinic && f.parent_id !== null).map(f => {
                       const parent = folders.find(p => p.id === f.parent_id)
-                      return <option key={f.id} value={f.id}>{parent?.name} → {f.name}</option>
+                      return <option key={f.id} value={f.id}>{parent?.name + ' > ' + f.name}</option>
                     })}
                   </select>
                 </Field>
                 {folderMsg && (
-                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: folderMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', color: folderMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)', border: '1px solid ' + (folderMsg.startsWith('✓') ? '#bbf7d0' : '#fecaca') }}>
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: '#f0fdf4', color: 'var(--green)', border: '1px solid #bbf7d0' }}>
                     {folderMsg}
                   </div>
                 )}
                 <button type="submit" style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>Create Folder</button>
               </form>
             </div>
+
             {(['MAH', 'HPVC'] as const).map(c => (
               <div key={c} style={{ marginBottom: 32 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -367,13 +523,14 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                 {folders.filter(f => f.clinic === c && f.parent_id === null).length === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--muted)', padding: '16px 0' }}>No folders yet for {c}</div>
                 ) : (
-                  <FolderTree folders={folders} docs={docs} parentId={null} clinic={c} depth={0} onDelete={handleDeleteFolder} />
+                  <FolderTree folders={folders} docs={docs} parentId={null} clinic={c} depth={0} onDelete={handleDeleteFolder} onEdit={setEditingFolder} />
                 )}
               </div>
             ))}
           </div>
         )}
 
+        {/* UPLOAD TAB */}
         {tab === 'upload' && (
           <div style={{ maxWidth: 560 }}>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Upload Document</div>
@@ -403,14 +560,14 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
               </Field>
               <Field label="Folder (optional)">
                 <select value={folderId} onChange={e => setFolderId(e.target.value)} style={selectStyle}>
-                  <option value="">— No folder —</option>
+                  <option value="">No folder</option>
                   {folders.filter(f => f.clinic === clinic || clinic === 'Both').map(f => (
                     <option key={f.id} value={f.id}>{getFolderLabel(folders, f)}</option>
                   ))}
                 </select>
               </Field>
               {uploadMsg && (
-                <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13, background: uploadMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', color: uploadMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)', border: '1px solid ' + (uploadMsg.startsWith('✓') ? '#bbf7d0' : '#fecaca') }}>
+                <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13, background: uploadMsg.startsWith('Error') ? '#fef2f2' : '#f0fdf4', color: uploadMsg.startsWith('Error') ? '#dc2626' : 'var(--green)', border: '1px solid ' + (uploadMsg.startsWith('Error') ? '#fecaca' : '#bbf7d0') }}>
                   {uploadMsg}
                 </div>
               )}
@@ -421,6 +578,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
           </div>
         )}
 
+        {/* LINKS TAB */}
         {tab === 'links' && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Video Links</div>
@@ -450,7 +608,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                   </Field>
                   <Field label="Folder (optional)">
                     <select value={linkFolderId} onChange={e => setLinkFolderId(e.target.value)} style={selectStyle}>
-                      <option value="">— No folder —</option>
+                      <option value="">No folder</option>
                       {folders.filter(f => f.clinic === linkClinic || linkClinic === 'Both').map(f => (
                         <option key={f.id} value={f.id}>{getFolderLabel(folders, f)}</option>
                       ))}
@@ -458,7 +616,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                   </Field>
                 </div>
                 {linkMsg && (
-                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: linkMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', color: linkMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)', border: '1px solid ' + (linkMsg.startsWith('✓') ? '#bbf7d0' : '#fecaca') }}>
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: '#f0fdf4', color: 'var(--green)', border: '1px solid #bbf7d0' }}>
                     {linkMsg}
                   </div>
                 )}
@@ -471,38 +629,83 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
             </div>
             {links.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>▶️</div>
                 <div style={{ fontSize: 14 }}>No video links yet</div>
               </div>
             ) : links.map(link => {
               const folder = folders.find(f => f.id === link.folder_id)
+              const isEditing = editingLink?.id === link.id
               return (
-                <div key={link.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div style={{ fontSize: 24, flexShrink: 0 }}>▶️</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{link.title}</div>
-                    {link.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>{link.description}</div>}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <Tag label={link.clinic} color={clinicColor(link.clinic)} />
-                      {folder && <Tag label={'📁 ' + getFolderLabel(folders, folder)} color="var(--muted)" />}
+                <div key={link.id}>
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', marginBottom: isEditing ? 0 : 10, display: 'flex', alignItems: 'center', gap: 14, borderBottomLeftRadius: isEditing ? 0 : 12, borderBottomRightRadius: isEditing ? 0 : 12 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: '#ff0000', padding: '2px 8px', borderRadius: 4, flexShrink: 0 }}>VIDEO</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{link.title}</div>
+                      {link.description && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>{link.description}</div>}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <Tag label={link.clinic} color={clinicColor(link.clinic)} />
+                        {folder && <Tag label={'Folder: ' + getFolderLabel(folders, folder)} color="var(--muted)" />}
+                      </div>
                     </div>
+                    <button onClick={() => setEditingLink(isEditing ? null : { ...link })} style={editBtn}>
+                      {isEditing ? 'Cancel' : 'Edit'}
+                    </button>
+                    <button onClick={() => handleDeleteLink(link.id, link.title)} style={deleteBtn}>Delete</button>
                   </div>
-                  <button onClick={() => handleDeleteLink(link.id, link.title)} style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>
-                    Delete
-                  </button>
+                  {isEditing && editingLink && (
+                    <div style={{ ...editPanelStyle, borderTopLeftRadius: 0, borderTopRightRadius: 0, marginBottom: 10 }}>
+                      <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 16, color: 'var(--accent)' }}>Edit Video Link</div>
+                      <form onSubmit={handleSaveLink}>
+                        <Field label="Title">
+                          <input value={editingLink.title} onChange={e => setEditingLink({ ...editingLink, title: e.target.value })} required style={inputStyle}
+                            onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                            onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                        </Field>
+                        <Field label="URL">
+                          <input value={editingLink.url} onChange={e => setEditingLink({ ...editingLink, url: e.target.value })} required style={inputStyle}
+                            onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                            onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                        </Field>
+                        <Field label="Description">
+                          <input value={editingLink.description || ''} onChange={e => setEditingLink({ ...editingLink, description: e.target.value })} style={inputStyle}
+                            onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                            onBlur={e => (e.target.style.borderColor = 'var(--border)')} />
+                        </Field>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                          <Field label="Clinic">
+                            <select value={editingLink.clinic} onChange={e => setEditingLink({ ...editingLink, clinic: e.target.value as any, folder_id: null })} style={selectStyle}>
+                              {CLINICS.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          </Field>
+                          <Field label="Folder">
+                            <select value={editingLink.folder_id || ''} onChange={e => setEditingLink({ ...editingLink, folder_id: e.target.value || null })} style={selectStyle}>
+                              <option value="">No folder</option>
+                              {folders.filter(f => f.clinic === editingLink.clinic || editingLink.clinic === 'Both').map(f => (
+                                <option key={f.id} value={f.id}>{getFolderLabel(folders, f)}</option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <button type="submit" style={{ ...primaryBtn, width: 'auto', padding: '9px 24px' }}>Save Changes</button>
+                          <button type="button" onClick={() => setEditingLink(null)} style={ghostBtn}>Cancel</button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
                 </div>
               )
             })}
           </div>
         )}
 
+        {/* STAFF TAB */}
         {tab === 'staff' && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 24 }}>Manage Staff</div>
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, marginBottom: 28 }}>
               <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Add New Staff Member</div>
               <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>
-                Set a temporary password for them. They log in at staff-hub-sigma.vercel.app and can change their password anytime via Forgot Password.
+                Set a temporary password for them. They log in at staff-hub-sigma.vercel.app and can change their password via Forgot Password.
               </div>
               <form onSubmit={handleAddStaff}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -534,7 +737,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                   </Field>
                 </div>
                 {inviteMsg && (
-                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: inviteMsg.startsWith('✓') ? '#f0fdf4' : '#fef2f2', color: inviteMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)', border: '1px solid ' + (inviteMsg.startsWith('✓') ? '#bbf7d0' : '#fecaca') }}>
+                  <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: inviteMsg.startsWith('Error') ? '#fef2f2' : '#f0fdf4', color: inviteMsg.startsWith('Error') ? '#dc2626' : 'var(--green)', border: '1px solid ' + (inviteMsg.startsWith('Error') ? '#fecaca' : '#bbf7d0') }}>
                     {inviteMsg}
                   </div>
                 )}
