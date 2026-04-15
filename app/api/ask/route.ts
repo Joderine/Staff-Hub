@@ -8,60 +8,68 @@ export async function POST(req: NextRequest) {
     if (!question) return NextResponse.json({ error: 'No question' }, { status: 400 })
 
     const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) return NextResponse.json({ answer: 'ERROR: ANTHROPIC_API_KEY is not set in environment variables.' })
+    if (!apiKey) return NextResponse.json({ answer: 'ERROR: ANTHROPIC_API_KEY is not set.' })
 
-    const anthropic = new Anthropic({ apiKey: apiKey.trim() })
     const supabase = createServiceClient()
 
-    // Fetch documents for this clinic
-    const { data: docs, error: dbError } = await supabase
-      .from('documents')
-      .select('*')
-      .or(`clinic.eq.${clinic},clinic.eq.Both`)
+    // Step 1 — Turn the question into an embedding (fingerprint)
+    const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.VOYAGE_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'voyage-2',
+        input: question,
+      }),
+    })
 
-    if (dbError) return NextResponse.json({ answer: `ERROR: Database error — ${dbError.message}` })
-    if (!docs?.length) return NextResponse.json({ answer: 'No documents have been uploaded yet for your clinic. Please contact your manager.' })
-
-    // Download PDFs and extract text — limit to first 3 docs and 3000 chars each
-    const MAX_DOCS = 3
-    const MAX_CHARS_PER_DOC = 3000
-    const docTexts: string[] = []
-
-    for (const doc of docs.slice(0, MAX_DOCS)) {
-      const { data: fileData, error: storageError } = await supabase.storage
-        .from('staff-docs')
-        .download(doc.storage_path)
-
-      if (storageError || !fileData) continue
-
-      // Convert to text — extract readable characters from PDF bytes
-      const buffer = Buffer.from(await fileData.arrayBuffer())
-      const rawText = buffer.toString('latin1')
-
-      // Pull out readable ASCII text from the PDF binary
-      const readable = rawText
-        .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, MAX_CHARS_PER_DOC)
-
-      if (readable.length > 100) {
-        docTexts.push(`--- ${doc.title} ---\n${readable}`)
-      }
+    if (!embeddingResponse.ok) {
+      return NextResponse.json({ answer: 'ERROR: Could not process your question. Please try again.' })
     }
 
-    if (!docTexts.length) return NextResponse.json({ answer: 'Documents could not be loaded. Please contact your manager.' })
+    const embeddingData = await embeddingResponse.json()
+    const queryEmbedding = embeddingData.data?.[0]?.embedding
 
-    const combinedContext = docTexts.join('\n\n')
+    if (!queryEmbedding) {
+      return NextResponse.json({ answer: 'ERROR: Could not generate question embedding.' })
+    }
+
+    // Step 2 — Find the most relevant chunks from the database
+    const { data: chunks, error: matchError } = await supabase.rpc('match_chunks', {
+      query_embedding: JSON.stringify(queryEmbedding),
+      match_clinic: clinic,
+      match_count: 5,
+    })
+
+    if (matchError) {
+      console.error('Match error:', matchError)
+      return NextResponse.json({ answer: 'ERROR: Could not search documents. Please try again.' })
+    }
+
+    if (!chunks?.length) {
+      return NextResponse.json({ 
+        answer: 'No relevant documents found for your question. Please contact your manager if you think this information should be available.' 
+      })
+    }
+
+    // Step 3 — Build context from the matching chunks
+    const context = chunks
+      .map((chunk: any) => `--- ${chunk.title} ---\n${chunk.chunk_text}`)
+      .join('\n\n')
+
+    // Step 4 — Ask Claude with only the relevant context
+    const anthropic = new Anthropic({ apiKey: apiKey.trim() })
 
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
-      system: `You are a helpful assistant for ${clinic} clinic staff. Answer questions based only on the provided documents. Be clear and practical. If you find a phone number, address or specific procedure, quote it exactly. If the answer is not in the documents, say so clearly.`,
+      system: `You are a helpful assistant for ${clinic} clinic staff. Answer questions based only on the provided document excerpts. Be clear and practical. If you find a phone number, address or specific procedure, quote it exactly. If the answer is not in the documents, say so clearly.`,
       messages: [
         {
           role: 'user',
-          content: `Here are the clinic documents:\n\n${combinedContext}\n\nQuestion: ${question}`,
+          content: `Here are the most relevant sections from the clinic documents:\n\n${context}\n\nQuestion: ${question}`,
         },
       ],
     })
