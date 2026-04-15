@@ -15,13 +15,41 @@ function chunkText(text: string, chunkSize = 500, overlap = 50): string[] {
   return chunks
 }
 
-// Extract readable text from PDF buffer
+// Extract readable text from PDF buffer using multiple strategies
 function extractText(buffer: Buffer): string {
-  const raw = buffer.toString('latin1')
-  return raw
+  const raw = buffer.toString('binary')
+  
+  // Strategy 1: Extract text between BT/ET markers (PDF text blocks)
+  const btEtMatches = raw.match(/BT[\s\S]*?ET/g) || []
+  const btEtText = btEtMatches
+    .join(' ')
+    .replace(/\(([^)]*)\)\s*Tj/g, '$1 ')
+    .replace(/\(([^)]*)\)\s*TJ/g, '$1 ')
     .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+
+  // Strategy 2: Extract parenthesised strings (common PDF text encoding)
+  const parenMatches = raw.match(/\(([^)]{2,})\)/g) || []
+  const parenText = parenMatches
+    .map(m => m.slice(1, -1))
+    .join(' ')
+    .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  // Use whichever strategy got more text
+  const result = btEtText.length > parenText.length ? btEtText : parenText
+
+  // Final fallback — just strip non-ASCII
+  if (result.length < 100) {
+    return raw
+      .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  return result
 }
 
 export async function POST(req: NextRequest) {
