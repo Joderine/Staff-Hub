@@ -27,6 +27,19 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ folder: data })
 }
 
+export async function PATCH(req: NextRequest) {
+  const { id, name, parent_id } = await req.json()
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+  const { data, error } = await supabaseAdmin
+    .from('folders')
+    .update({ name, parent_id: parent_id || null })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ folder: data })
+}
+
 export async function DELETE(req: NextRequest) {
   const { id } = await req.json()
   const { error } = await supabaseAdmin.from('folders').delete().eq('id', id)
