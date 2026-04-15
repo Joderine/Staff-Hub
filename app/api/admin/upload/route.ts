@@ -2,19 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 
-// Split text into overlapping chunks
-function chunkText(text: string, chunkSize = 500, overlap = 50): string[] {
-  const words = text.split(/\s+/)
-  const chunks: string[] = []
-  let i = 0
-  while (i < words.length) {
-    const chunk = words.slice(i, i + chunkSize).join(' ')
-    if (chunk.trim().length > 50) chunks.push(chunk.trim())
-    i += chunkSize - overlap
-  }
-  return chunks
-}
-
 // Extract readable text from PDF buffer using multiple strategies
 function extractText(buffer: Buffer): string {
   const raw = buffer.toString('binary')
@@ -50,6 +37,19 @@ function extractText(buffer: Buffer): string {
   }
 
   return result
+}
+
+// Split text into overlapping chunks
+function chunkText(text: string, chunkSize = 500, overlap = 50): string[] {
+  const words = text.split(/\s+/)
+  const chunks: string[] = []
+  let i = 0
+  while (i < words.length) {
+    const chunk = words.slice(i, i + chunkSize).join(' ')
+    if (chunk.trim().length > 50) chunks.push(chunk.trim())
+    i += chunkSize - overlap
+  }
+  return chunks
 }
 
 export async function POST(req: NextRequest) {
@@ -99,29 +99,25 @@ export async function POST(req: NextRequest) {
 
     // Extract text and create embeddings
     try {
-      const apiKey = process.env.ANTHROPIC_API_KEY
-      if (!apiKey) throw new Error('No API key')
-
-      const anthropic = new Anthropic({ apiKey: apiKey.trim() })
+      const voyageKey = process.env.VOYAGE_API_KEY
+      if (!voyageKey) throw new Error('No Voyage API key')
 
       // Extract text from PDF
       const text = extractText(buffer)
+      console.log(`Extracted ${text.length} chars from ${title}`)
 
       if (text.length > 100) {
-        // Split into chunks
         const chunks = chunkText(text)
+        console.log(`Created ${chunks.length} chunks for ${title}`)
 
-        // Get embeddings for each chunk from Voyage AI via Anthropic
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i]
 
-          // Use Claude to generate a simple embedding via text similarity
-          // We'll store chunks without embeddings first, then embed via voyage
           const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.VOYAGE_API_KEY}`,
+              'Authorization': `Bearer ${voyageKey}`,
             },
             body: JSON.stringify({
               model: 'voyage-2',
@@ -130,16 +126,20 @@ export async function POST(req: NextRequest) {
           })
 
           if (!embeddingResponse.ok) {
-            console.error('Embedding failed for chunk', i)
+            const errText = await embeddingResponse.text()
+            console.error(`Embedding failed for chunk ${i}:`, errText)
             continue
           }
 
           const embeddingData = await embeddingResponse.json()
           const embedding = embeddingData.data?.[0]?.embedding
 
-          if (!embedding) continue
+          if (!embedding) {
+            console.error(`No embedding returned for chunk ${i}`)
+            continue
+          }
 
-          await supabase.from('document_chunks').insert({
+          const { error: chunkError } = await supabase.from('document_chunks').insert({
             document_id: data.id,
             clinic,
             title,
@@ -147,10 +147,15 @@ export async function POST(req: NextRequest) {
             embedding: JSON.stringify(embedding),
             chunk_index: i,
           })
+
+          if (chunkError) {
+            console.error(`Failed to save chunk ${i}:`, chunkError.message)
+          }
         }
+      } else {
+        console.warn(`Not enough text extracted from ${title} — only ${text.length} chars`)
       }
     } catch (embeddingErr: any) {
-      // Don't fail the upload if embedding fails — just log it
       console.error('Embedding error (non-fatal):', embeddingErr.message)
     }
 
