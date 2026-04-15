@@ -2,51 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 
-// Extract readable text from PDF buffer using multiple strategies
-function extractText(buffer: Buffer): string {
-  const raw = buffer.toString('binary')
-  
-  // Strategy 1: Extract text between BT/ET markers (PDF text blocks)
-  const btEtMatches = raw.match(/BT[\s\S]*?ET/g) || []
-  const btEtText = btEtMatches
-    .join(' ')
-    .replace(/\(([^)]*)\)\s*Tj/g, '$1 ')
-    .replace(/\(([^)]*)\)\s*TJ/g, '$1 ')
-    .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  // Strategy 2: Extract parenthesised strings (common PDF text encoding)
-  const parenMatches = raw.match(/\(([^)]{2,})\)/g) || []
-  const parenText = parenMatches
-    .map(m => m.slice(1, -1))
-    .join(' ')
-    .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  // Use whichever strategy got more text
-  const result = btEtText.length > parenText.length ? btEtText : parenText
-
-  // Final fallback — just strip non-ASCII
-  if (result.length < 100) {
-    return raw
-      .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-  }
-
-  return result
-}
-
 // Split text into overlapping chunks
-function chunkText(text: string, chunkSize = 500, overlap = 50): string[] {
-  const words = text.split(/\s+/)
+function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
+  const words = text.split(/\s+/).filter(w => w.length > 0)
   const chunks: string[] = []
   let i = 0
   while (i < words.length) {
-    const chunk = words.slice(i, i + chunkSize).join(' ')
-    if (chunk.trim().length > 50) chunks.push(chunk.trim())
+    const chunk = words.slice(i, i + chunkSize).join(' ').trim()
+    if (chunk.length > 50) chunks.push(chunk)
     i += chunkSize - overlap
   }
   return chunks
@@ -97,49 +60,95 @@ export async function POST(req: NextRequest) {
 
     if (dbError) throw new Error('DB error: ' + dbError.message)
 
-    // Extract text and create embeddings
+    // Extract text using Claude (reliable, handles all PDF types)
     try {
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
       const voyageKey = process.env.VOYAGE_API_KEY
-      if (!voyageKey) throw new Error('No Voyage API key')
 
-      // Extract text from PDF
-      const text = extractText(buffer)
-      console.log(`Extracted ${text.length} chars from ${title}`)
+      if (!anthropicKey || !voyageKey) {
+        throw new Error('Missing API keys')
+      }
 
-      if (text.length > 100) {
-        const chunks = chunkText(text)
-        console.log(`Created ${chunks.length} chunks for ${title}`)
+      // Step 1 — Send PDF to Claude and ask it to extract all text
+      const anthropic = new Anthropic({ apiKey: anthropicKey.trim() })
+      const base64 = buffer.toString('base64')
 
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i]
+      console.log(`Extracting text from ${title} using Claude...`)
 
-          const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${voyageKey}`,
-            },
-            body: JSON.stringify({
-              model: 'voyage-2',
-              input: chunk,
-            }),
-          })
+      const extractionMsg = await anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4000,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'document',
+                source: {
+                  type: 'base64',
+                  media_type: 'application/pdf',
+                  data: base64,
+                },
+              } as any,
+              {
+                type: 'text',
+                text: 'Please extract ALL the text content from this document. Output only the raw text, preserving the structure and content as accurately as possible. Do not summarise, skip, or paraphrase anything — include everything.',
+              },
+            ],
+          },
+        ],
+      })
 
-          if (!embeddingResponse.ok) {
-            const errText = await embeddingResponse.text()
-            console.error(`Embedding failed for chunk ${i}:`, errText)
-            continue
-          }
+      const extractedText = extractionMsg.content
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.text)
+        .join('')
 
-          const embeddingData = await embeddingResponse.json()
-          const embedding = embeddingData.data?.[0]?.embedding
+      console.log(`Extracted ${extractedText.length} chars from ${title}`)
 
-          if (!embedding) {
-            console.error(`No embedding returned for chunk ${i}`)
-            continue
-          }
+      if (extractedText.length < 50) {
+        throw new Error('Not enough text extracted from document')
+      }
 
-          const { error: chunkError } = await supabase.from('document_chunks').insert({
+      // Step 2 — Split into chunks
+      const chunks = chunkText(extractedText)
+      console.log(`Created ${chunks.length} chunks for ${title}`)
+
+      // Step 3 — Embed each chunk via Voyage AI and save to database
+      let savedCount = 0
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i]
+
+        const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${voyageKey}`,
+          },
+          body: JSON.stringify({
+            model: 'voyage-2',
+            input: chunk,
+          }),
+        })
+
+        if (!embeddingResponse.ok) {
+          const errText = await embeddingResponse.text()
+          console.error(`Voyage embedding failed for chunk ${i}:`, errText)
+          continue
+        }
+
+        const embeddingData = await embeddingResponse.json()
+        const embedding = embeddingData.data?.[0]?.embedding
+
+        if (!embedding) {
+          console.error(`No embedding returned for chunk ${i}`)
+          continue
+        }
+
+        const { error: chunkError } = await supabase
+          .from('document_chunks')
+          .insert({
             document_id: data.id,
             clinic,
             title,
@@ -148,20 +157,24 @@ export async function POST(req: NextRequest) {
             chunk_index: i,
           })
 
-          if (chunkError) {
-            console.error(`Failed to save chunk ${i}:`, chunkError.message)
-          }
+        if (chunkError) {
+          console.error(`Failed to save chunk ${i}:`, chunkError.message)
+        } else {
+          savedCount++
         }
-      } else {
-        console.warn(`Not enough text extracted from ${title} — only ${text.length} chars`)
       }
+
+      console.log(`Successfully saved ${savedCount}/${chunks.length} chunks for ${title}`)
+
     } catch (embeddingErr: any) {
-      console.error('Embedding error (non-fatal):', embeddingErr.message)
+      // Non-fatal — document is still uploaded, just won't be searchable yet
+      console.error('Embedding pipeline error (non-fatal):', embeddingErr.message)
     }
 
     return NextResponse.json({ document: data })
 
   } catch (err: any) {
+    console.error('Upload error:', err.message)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
