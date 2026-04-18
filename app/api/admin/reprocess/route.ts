@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 
@@ -14,13 +14,12 @@ function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
   return chunks
 }
 
-export async function POST(req: NextRequest) {
+export async function POST() {
   try {
     const supabase = createServiceClient()
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim() })
     const voyageKey = process.env.VOYAGE_API_KEY!
 
-    // Get all documents
     const { data: documents, error: docsError } = await supabase
       .from('documents')
       .select('*')
@@ -32,10 +31,8 @@ export async function POST(req: NextRequest) {
 
     for (const doc of documents) {
       try {
-        // Delete existing chunks for this doc (clean slate)
         await supabase.from('document_chunks').delete().eq('document_id', doc.id)
 
-        // Download PDF from storage
         const { data: fileData, error: downloadError } = await supabase.storage
           .from('staff-docs')
           .download(doc.storage_path)
@@ -48,7 +45,6 @@ export async function POST(req: NextRequest) {
         const buffer = Buffer.from(await fileData.arrayBuffer())
         const base64 = buffer.toString('base64')
 
-        // Extract text via Claude
         const extractionMsg = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4000,
@@ -79,7 +75,6 @@ export async function POST(req: NextRequest) {
           continue
         }
 
-        // Chunk and embed
         const chunks = chunkText(extractedText)
         let savedCount = 0
 
