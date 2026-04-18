@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 
@@ -14,42 +14,45 @@ function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
   return chunks
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
-    const supabase = createServiceClient()
+    const { documentId } = await req.json()
+    if (!documentId) return NextResponse.json({ error: 'Missing documentId' }, { status: 400 })
 
-    // Test 1 — can we fetch documents?
-    const { data: documents, error: docsError } = await supabase
+    const supabase = createServiceClient()
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim() })
+    const voyageKey = process.env.VOYAGE_API_KEY!
+
+    // Fetch the single document
+    const { data: doc, error: docError } = await supabase
       .from('documents')
       .select('*')
-      .order('created_at', { ascending: true })
+      .eq('id', documentId)
+      .single()
 
-    if (docsError) {
-      return NextResponse.json({ error: 'FAILED AT: fetch documents', detail: docsError.message })
+    if (docError || !doc) {
+      return NextResponse.json({ status: 'failed', reason: 'Document not found' })
     }
 
-    if (!documents?.length) {
-      return NextResponse.json({ error: 'FAILED AT: no documents found' })
-    }
+    // Delete existing chunks
+    await supabase.from('document_chunks').delete().eq('document_id', doc.id)
 
-    // Test 2 — can we download the first file?
-    const firstDoc = documents[0]
+    // Download PDF
     const { data: fileData, error: downloadError } = await supabase.storage
       .from('staff-docs')
-      .download(firstDoc.storage_path)
+      .download(doc.storage_path)
 
-    if (downloadError) {
-      return NextResponse.json({ error: 'FAILED AT: storage download', detail: downloadError.message, path: firstDoc.storage_path })
+    if (downloadError || !fileData) {
+      return NextResponse.json({ status: 'failed', reason: 'Could not download file' })
     }
 
-    // Test 3 — can we call Anthropic?
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim() })
     const buffer = Buffer.from(await fileData.arrayBuffer())
     const base64 = buffer.toString('base64')
 
+    // Extract text via Claude
     const extractionMsg = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 500,
+      max_tokens: 4000,
       messages: [
         {
           role: 'user',
@@ -58,7 +61,10 @@ export async function POST() {
               type: 'document',
               source: { type: 'base64', media_type: 'application/pdf', data: base64 },
             } as any,
-            { type: 'text', text: 'Extract the first 100 words of text from this document.' },
+            {
+              type: 'text',
+              text: 'Please extract ALL the text content from this document. Output only the raw text, preserving the structure and content as accurately as possible. Do not summarise, skip, or paraphrase anything — include everything.',
+            },
           ],
         },
       ],
@@ -69,14 +75,49 @@ export async function POST() {
       .map((b: any) => b.text)
       .join('')
 
-    return NextResponse.json({ 
-      success: true, 
-      docCount: documents.length,
-      firstDoc: firstDoc.title,
-      extractedPreview: extractedText.slice(0, 200)
-    })
+    if (extractedText.length < 50) {
+      return NextResponse.json({ status: 'failed', reason: 'Not enough text extracted' })
+    }
+
+    // Chunk and embed
+    const chunks = chunkText(extractedText)
+    let savedCount = 0
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]
+
+      const embeddingResponse = await fetch('https://api.voyageai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${voyageKey}`,
+        },
+        body: JSON.stringify({ model: 'voyage-2', input: chunk }),
+      })
+
+      if (!embeddingResponse.ok) continue
+
+      const embeddingData = await embeddingResponse.json()
+      const embedding = embeddingData.data?.[0]?.embedding
+      if (!embedding) continue
+
+      const { error: chunkError } = await supabase
+        .from('document_chunks')
+        .insert({
+          document_id: doc.id,
+          clinic: doc.clinic,
+          title: doc.title,
+          chunk_text: chunk,
+          embedding: JSON.stringify(embedding),
+          chunk_index: i,
+        })
+
+      if (!chunkError) savedCount++
+    }
+
+    return NextResponse.json({ status: 'ok', title: doc.title, chunks: savedCount })
 
   } catch (err: any) {
-    return NextResponse.json({ error: 'UNHANDLED ERROR', detail: err.message })
+    return NextResponse.json({ status: 'failed', reason: err.message })
   }
 }
