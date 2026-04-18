@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { supabase } from '@/lib/supabase'
 import { StaffProfile, Document, CATEGORIES, CLINICS } from '@/lib/types'
 
 interface Folder { id: string; name: string; clinic: string; parent_id: string | null }
@@ -82,6 +81,8 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
   const [folders, setFolders] = useState<Folder[]>([])
   const [links, setLinks] = useState<Link[]>([])
   const [loading, setLoading] = useState(false)
+  const [reprocessing, setReprocessing] = useState(false)
+  const [reprocessResults, setReprocessResults] = useState<any[] | null>(null)
 
   // Upload state
   const [file, setFile] = useState<File | null>(null)
@@ -144,6 +145,24 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     const res = await fetch('/api/admin/links')
     const data = await res.json()
     if (data.links) setLinks(data.links)
+  }
+
+  async function handleReprocess() {
+    if (!confirm('This will re-process all ' + docs.length + ' documents for AI search. This may take a few minutes. Continue?')) return
+    setReprocessing(true)
+    setReprocessResults(null)
+    try {
+      const res = await fetch('/api/admin/reprocess', { method: 'POST' })
+      const data = await res.json()
+      if (data.results) {
+        setReprocessResults(data.results)
+      } else {
+        setReprocessResults([{ title: 'Error', status: 'failed', reason: data.error }])
+      }
+    } catch (err: any) {
+      setReprocessResults([{ title: 'Error', status: 'failed', reason: err.message }])
+    }
+    setReprocessing(false)
   }
 
   async function handleUpload(e: React.FormEvent) {
@@ -371,8 +390,33 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 18 }}>All Documents</div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--muted)' }}>{docs.length} documents</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--muted)' }}>{docs.length} documents</div>
+                <button
+                  onClick={handleReprocess}
+                  disabled={reprocessing}
+                  style={{ background: reprocessing ? 'var(--muted)' : '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 12, fontFamily: "'DM Sans', sans-serif", fontWeight: 500, cursor: reprocessing ? 'not-allowed' : 'pointer' }}
+                >
+                  {reprocessing ? 'Processing... (may take a few minutes)' : '⚡ Rebuild AI Search'}
+                </button>
+              </div>
             </div>
+
+            {reprocessResults && (
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Reprocess Results</div>
+                {reprocessResults.map((r, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: i < reprocessResults.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <span style={{ fontSize: 14 }}>{r.status === 'ok' ? '✅' : '❌'}</span>
+                    <span style={{ flex: 1, fontSize: 13 }}>{r.title}</span>
+                    <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: "'DM Mono', monospace" }}>
+                      {r.status === 'ok' ? r.chunks + ' chunks' : r.reason}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {docs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                 <div style={{ fontSize: 14, color: 'var(--muted)' }}>No documents yet</div>
