@@ -83,6 +83,7 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
   const [loading, setLoading] = useState(false)
   const [reprocessing, setReprocessing] = useState(false)
   const [reprocessResults, setReprocessResults] = useState<any[] | null>(null)
+  const [reprocessProgress, setReprocessProgress] = useState('')
 
   // Upload state
   const [file, setFile] = useState<File | null>(null)
@@ -151,17 +152,28 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
     if (!confirm('This will re-process all ' + docs.length + ' documents for AI search. This may take a few minutes. Continue?')) return
     setReprocessing(true)
     setReprocessResults(null)
-    try {
-      const res = await fetch('/api/admin/reprocess', { method: 'POST' })
-      const data = await res.json()
-      if (data.results) {
-        setReprocessResults(data.results)
-      } else {
-        setReprocessResults([{ title: 'Error', status: 'failed', reason: data.error }])
+    setReprocessProgress('')
+
+    const results: any[] = []
+
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i]
+      setReprocessProgress(`Processing ${i + 1} of ${docs.length}: ${doc.title}...`)
+      try {
+        const res = await fetch('/api/admin/reprocess', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documentId: doc.id })
+        })
+        const data = await res.json()
+        results.push({ title: doc.title, status: data.status, chunks: data.chunks, reason: data.reason })
+      } catch (err: any) {
+        results.push({ title: doc.title, status: 'failed', reason: err.message })
       }
-    } catch (err: any) {
-      setReprocessResults([{ title: 'Error', status: 'failed', reason: err.message }])
+      setReprocessResults([...results])
     }
+
+    setReprocessProgress('Complete!')
     setReprocessing(false)
   }
 
@@ -397,14 +409,16 @@ export default function AdminPortal({ profile, onSignOut }: Props) {
                   disabled={reprocessing}
                   style={{ background: reprocessing ? 'var(--muted)' : '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 12, fontFamily: "'DM Sans', sans-serif", fontWeight: 500, cursor: reprocessing ? 'not-allowed' : 'pointer' }}
                 >
-                  {reprocessing ? 'Processing... (may take a few minutes)' : '⚡ Rebuild AI Search'}
+                  {reprocessing ? reprocessProgress || 'Processing...' : '⚡ Rebuild AI Search'}
                 </button>
               </div>
             </div>
 
             {reprocessResults && (
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Reprocess Results</div>
+                <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14, marginBottom: 12 }}>
+                  Reprocess Results {reprocessing ? `(${reprocessResults.length}/${docs.length})` : '— Done'}
+                </div>
                 {reprocessResults.map((r, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: i < reprocessResults.length - 1 ? '1px solid var(--border)' : 'none' }}>
                     <span style={{ fontSize: 14 }}>{r.status === 'ok' ? '✅' : '❌'}</span>
