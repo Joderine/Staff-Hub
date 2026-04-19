@@ -12,7 +12,6 @@ export async function GET(req: NextRequest) {
 
   const token = authHeader.replace('Bearer ', '')
 
-  // Verify the user with the token
   const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
 
   if (userError || !user) {
@@ -20,13 +19,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
   }
 
-  console.log('Looking up profile for user:', user.id, user.email)
-
-  // Try by ID first
-  let { data, error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('staff_profiles')
     .select('*')
     .eq('id', user.id)
     .single()
 
-  // Fallback: try by email (handles ID mismatch edge cas
+  if (error || !data) {
+    const fallback = await supabaseAdmin
+      .from('staff_profiles')
+      .select('*')
+      .eq('email', user.email)
+      .single()
+
+    if (fallback.error || !fallback.data) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
+    }
+
+    return NextResponse.json({ profile: fallback.data })
+  }
+
+  return NextResponse.json({ profile: data })
+}
