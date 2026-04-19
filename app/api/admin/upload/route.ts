@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 
+export const maxDuration = 300
+
 // Split text into overlapping chunks
 function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
   const words = text.split(/\s+/).filter(w => w.length > 0)
