@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
-import Anthropic from '@anthropic-ai/sdk'
 
 export const maxDuration = 300
 
-// Split text into overlapping chunks
 function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
   const words = text.split(/\s+/).filter(w => w.length > 0)
   const chunks: string[] = []
@@ -15,6 +13,41 @@ function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
     i += chunkSize - overlap
   }
   return chunks
+}
+
+async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  const text = buffer.toString('latin1')
+  const chunks: string[] = []
+  let btIndex = 0
+  while ((btIndex = text.indexOf('BT', btIndex)) !== -1) {
+    const etIndex = text.indexOf('ET', btIndex)
+    if (etIndex === -1) break
+    const block = text.slice(btIndex, etIndex)
+    const matches = block.match(/\(([^)]+)\)/g)
+    if (matches) {
+      for (const m of matches) {
+        const content = m.slice(1, -1).replace(/\\[nrt]/g, ' ').trim()
+        if (content.length > 2) chunks.push(content)
+      }
+    }
+    btIndex = etIndex + 2
+  }
+  const raw = chunks.join(' ')
+  if (raw.length > 100) return raw
+
+  // Fallback: grab any readable ASCII strings
+  const strings: string[] = []
+  let current = ''
+  for (let i = 0; i < buffer.length; i++) {
+    const c = buffer[i]
+    if (c >= 32 && c <= 126) {
+      current += String.fromCharCode(c)
+    } else {
+      if (current.length > 4) strings.push(current)
+      current = ''
+    }
+  }
+  return strings.filter(s => /[a-zA-Z]{3,}/.test(s)).join(' ')
 }
 
 export async function POST(req: NextRequest) {
@@ -45,7 +78,6 @@ export async function POST(req: NextRequest) {
 
     if (storageError) throw new Error('Storage upload failed: ' + storageError.message)
 
-    // Save document record
     const { data, error: dbError } = await supabase
       .from('documents')
       .insert({
@@ -62,63 +94,22 @@ export async function POST(req: NextRequest) {
 
     if (dbError) throw new Error('DB error: ' + dbError.message)
 
-    // Extract text using Claude (reliable, handles all PDF types)
     try {
-      const anthropicKey = process.env.ANTHROPIC_API_KEY
       const voyageKey = process.env.VOYAGE_API_KEY
+      if (!voyageKey) throw new Error('Missing VOYAGE_API_KEY')
 
-      if (!anthropicKey || !voyageKey) {
-        throw new Error('Missing API keys')
-      }
-
-      // Step 1 — Send PDF to Claude and ask it to extract all text
-      const anthropic = new Anthropic({ apiKey: anthropicKey.trim() })
-      const base64 = buffer.toString('base64')
-
-      console.log(`Extracting text from ${title} using Claude...`)
-
-      const extractionMsg = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'document',
-                source: {
-                  type: 'base64',
-                  media_type: 'application/pdf',
-                  data: base64,
-                },
-              } as any,
-              {
-                type: 'text',
-                text: 'Please extract ALL the text content from this document. Output only the raw text, preserving the structure and content as accurately as possible. Do not summarise, skip, or paraphrase anything — include everything.',
-              },
-            ],
-          },
-        ],
-      })
-
-      const extractedText = extractionMsg.content
-        .filter((b: any) => b.type === 'text')
-        .map((b: any) => b.text)
-        .join('')
-
+      console.log(`Extracting text from ${title}...`)
+      const extractedText = await extractTextFromPDF(buffer)
       console.log(`Extracted ${extractedText.length} chars from ${title}`)
 
       if (extractedText.length < 50) {
-        throw new Error('Not enough text extracted from document')
+        throw new Error('Not enough text extracted from PDF')
       }
 
-      // Step 2 — Split into chunks
       const chunks = chunkText(extractedText)
       console.log(`Created ${chunks.length} chunks for ${title}`)
 
-      // Step 3 — Embed each chunk via Voyage AI and save to database
       let savedCount = 0
-
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i]
 
@@ -128,25 +119,17 @@ export async function POST(req: NextRequest) {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${voyageKey}`,
           },
-          body: JSON.stringify({
-            model: 'voyage-2',
-            input: chunk,
-          }),
+          body: JSON.stringify({ model: 'voyage-2', input: chunk }),
         })
 
         if (!embeddingResponse.ok) {
-          const errText = await embeddingResponse.text()
-          console.error(`Voyage embedding failed for chunk ${i}:`, errText)
+          console.error(`Voyage failed for chunk ${i}:`, await embeddingResponse.text())
           continue
         }
 
         const embeddingData = await embeddingResponse.json()
         const embedding = embeddingData.data?.[0]?.embedding
-
-        if (!embedding) {
-          console.error(`No embedding returned for chunk ${i}`)
-          continue
-        }
+        if (!embedding) { console.error(`No embedding for chunk ${i}`); continue }
 
         const { error: chunkError } = await supabase
           .from('document_chunks')
@@ -166,11 +149,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      console.log(`Successfully saved ${savedCount}/${chunks.length} chunks for ${title}`)
+      console.log(`Saved ${savedCount}/${chunks.length} chunks for ${title}`)
 
     } catch (embeddingErr: any) {
-      // Non-fatal — document is still uploaded, just won't be searchable yet
-      console.error('Embedding pipeline error (non-fatal):', embeddingErr.message)
+      console.error('Embedding pipeline error:', embeddingErr.message)
     }
 
     return NextResponse.json({ document: data })
