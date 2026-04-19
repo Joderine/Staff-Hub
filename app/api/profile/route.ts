@@ -14,16 +14,19 @@ export async function GET(req: NextRequest) {
 
   // Verify the user with the token
   const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
-  if (userError || !user) return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
 
-  // Fetch profile using service role (bypasses RLS)
-  const { data, error } = await supabaseAdmin
+  if (userError || !user) {
+    console.error('Auth error:', userError?.message)
+    return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
+  }
+
+  console.log('Looking up profile for user:', user.id, user.email)
+
+  // Try by ID first
+  let { data, error } = await supabaseAdmin
     .from('staff_profiles')
     .select('*')
     .eq('id', user.id)
     .single()
 
-  if (error || !data) return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
-
-  return NextResponse.json({ profile: data })
-}
+  // Fallback: try by email (handles ID mismatch edge cas
