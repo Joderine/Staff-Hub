@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
-import pdfParse from 'pdf-parse'
+const pdfParse = require('pdf-parse')
 
 export const maxDuration = 300
 
