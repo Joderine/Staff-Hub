@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import pdfParse from 'pdf-parse'
 
 export const maxDuration = 300
 
@@ -13,40 +14,6 @@ function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
     i += chunkSize - overlap
   }
   return chunks
-}
-
-async function extractTextFromPDF(buffer: Buffer): Promise<string> {
-  const text = buffer.toString('latin1')
-  const chunks: string[] = []
-  let btIndex = 0
-  while ((btIndex = text.indexOf('BT', btIndex)) !== -1) {
-    const etIndex = text.indexOf('ET', btIndex)
-    if (etIndex === -1) break
-    const block = text.slice(btIndex, etIndex)
-    const matches = block.match(/\(([^)]+)\)/g)
-    if (matches) {
-      for (const m of matches) {
-        const content = m.slice(1, -1).replace(/\\[nrt]/g, ' ').trim()
-        if (content.length > 2) chunks.push(content)
-      }
-    }
-    btIndex = etIndex + 2
-  }
-  const raw = chunks.join(' ')
-  if (raw.length > 100) return raw
-
-  const strings: string[] = []
-  let current = ''
-  for (let i = 0; i < buffer.length; i++) {
-    const c = buffer[i]
-    if (c >= 32 && c <= 126) {
-      current += String.fromCharCode(c)
-    } else {
-      if (current.length > 4) strings.push(current)
-      current = ''
-    }
-  }
-  return strings.filter(s => /[a-zA-Z]{3,}/.test(s)).join(' ')
 }
 
 export async function POST(req: NextRequest) {
@@ -97,7 +64,8 @@ export async function POST(req: NextRequest) {
       if (!voyageKey) throw new Error('Missing VOYAGE_API_KEY')
 
       console.log(`Extracting text from ${title}...`)
-      const extractedText = await extractTextFromPDF(buffer)
+      const parsed = await pdfParse(buffer)
+      const extractedText = parsed.text
       console.log(`Extracted ${extractedText.length} chars from ${title}`)
 
       if (extractedText.length < 50) {
