@@ -35,7 +35,6 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   const raw = chunks.join(' ')
   if (raw.length > 100) return raw
 
-  // Fallback: grab any readable ASCII strings
   const strings: string[] = []
   let current = ''
   for (let i = 0; i < buffer.length; i++) {
@@ -68,7 +67,6 @@ export async function POST(req: NextRequest) {
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
-    // Upload file to storage
     const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
     const storagePath = `${Date.now()}-${safeName}`
 
@@ -129,7 +127,10 @@ export async function POST(req: NextRequest) {
 
         const embeddingData = await embeddingResponse.json()
         const embedding = embeddingData.data?.[0]?.embedding
-        if (!embedding) { console.error(`No embedding for chunk ${i}`); continue }
+        if (!embedding) {
+          console.error(`No embedding for chunk ${i}`)
+          continue
+        }
 
         const { error: chunkError } = await supabase
           .from('document_chunks')
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
             clinic,
             title,
             chunk_text: chunk,
-            embedding: JSON.stringify(embedding),
+            embedding: '[' + embedding.join(',') + ']',
             chunk_index: i,
           })
 
